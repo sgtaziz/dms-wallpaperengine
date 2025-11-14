@@ -11,6 +11,10 @@ PluginComponent {
 
     property var monitorScenes: pluginData.monitorScenes || {}
     property var processes: ({})
+    property string mainMonitor: {
+        const monitors = Object.keys(monitorScenes)
+        return monitors.length > 0 ? monitors[0] : ""
+    }
 
     Connections {
         target: PluginService
@@ -153,7 +157,8 @@ PluginComponent {
 
                     var setWallpaper = setWallpaperTimer.createObject(root, {
                         monitor: monitor,
-                        screenshotPath: screenshotPath
+                        screenshotPath: screenshotPath,
+                        mainMonitor: root.mainMonitor
                     })
                     setWallpaper.running = true
                 }
@@ -169,6 +174,7 @@ PluginComponent {
         Timer {
             property string monitor: ""
             property string screenshotPath: ""
+            property string mainMonitor: ""
 
             running: false
             repeat: false
@@ -177,6 +183,11 @@ PluginComponent {
             onTriggered: {
                 console.info("Set wp on", monitor, "to", screenshotPath)
                 SessionData.setMonitorWallpaper(monitor, screenshotPath)
+
+                if (monitor === mainMonitor) {
+                    console.info("Setting main wallpaper to", screenshotPath)
+                    SessionData.setWallpaper(screenshotPath)
+                }
             }
         }
     }
