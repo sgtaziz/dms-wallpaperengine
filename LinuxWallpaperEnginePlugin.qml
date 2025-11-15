@@ -20,6 +20,11 @@ PluginComponent {
         syncScenesWithData()
     }
 
+    function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    }
+
+
     function deepEqual(a, b) {
         if (a === b) return true
         if (a === null || b === null) return false
@@ -124,7 +129,6 @@ PluginComponent {
                     "linux-wallpaperengine",
                     "--screen-root", monitor,
                     "--screenshot", screenshotPath,
-                    "--screenshot-delay", 15,
                     "--bg", sceneId
                 ]
 
@@ -178,8 +182,7 @@ PluginComponent {
             property string newSceneId: ""
 
             command: [
-                "sh", "-c",
-                "pgrep -f 'linux-wallpaperengine.*screen-root " + monitor + "' | xargs -r kill"
+                "pkill", "-f", ".*linux-wallpaperengine.*screen-root " + escapeRegex(monitor)
             ]
 
 
@@ -239,9 +242,6 @@ PluginComponent {
     }
 
     Component.onCompleted: {
-        if !SessionData.perMonitorWallpaper {
-            SessionData.setPerMonitorWallpaper(enabled)
-        }
         console.info("LinuxWallpaperEngine: Plugin started")
         syncScenesWithData()
     }
@@ -257,10 +257,10 @@ PluginComponent {
         }
 
         for (const monitor in monitorScenes) {
-            var killerProc = killerComponent.createObject(root, {
-                monitor: monitor
-            })
-            killerProc.running = true
+            // synchronous process call blocking
+            Quickshell.execDetached([
+                "pkill", "-f", "linux-wallpaperengine.*--screen-root " + escapeRegex(monitor)
+            ])
         }
     }
 }
