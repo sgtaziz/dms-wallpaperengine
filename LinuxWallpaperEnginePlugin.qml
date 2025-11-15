@@ -16,28 +16,66 @@ PluginComponent {
         return monitors.length > 0 ? monitors[0] : ""
     }
 
-    Connections {
-        target: PluginService
-        function onGlobalVarChanged(pluginId, varName) {
-            if (pluginId === "linuxWallpaperEngine" && varName === "lastChange") {
-                if (PluginService.getGlobalVar("linuxWallpaperEngine", "lastChange", 0) > 0) {
-                    syncScenesWithData()
-                }
-            }
-        }
-    }
-
     onPluginDataChanged: {
         syncScenesWithData()
+    }
+
+    function deepEqual(a, b) {
+        if (a === b) return true
+        if (a === null || b === null) return false
+        if (typeof a !== "object" || typeof b !== "object") return false
+
+        const aIsArray = Array.isArray(a)
+        const bIsArray = Array.isArray(b)
+        if (aIsArray !== bIsArray) return false
+
+        const aKeys = Object.keys(a)
+        const bKeys = Object.keys(b)
+        if (aKeys.length !== bKeys.length) return false
+
+        for (let i = 0; i < aKeys.length; ++i) {
+            const key = aKeys[i]
+            if (!b.hasOwnProperty(key)) return false
+            if (!deepEqual(a[key], b[key])) return false
+        }
+
+        return true
     }
 
     function syncScenesWithData() {
         const newScenes = pluginData.monitorScenes || {}
 
+        for (const monitor in monitorScenes) {
+            if (!newScenes.hasOwnProperty(monitor)) {
+                // monitor removed
+                stopWallpaperEngine(monitor, false, "")
+            }
+        }
+
         for (const monitor in newScenes) {
-            const sceneId = newScenes[monitor]
-            const currentSceneId = monitorScenes[monitor]
-            launchWallpaperEngine(monitor, sceneId)
+            const newSceneId = newScenes[monitor]
+            const oldSceneId = monitorScenes[monitor]
+
+            if (!newSceneId) {
+                if (processes[monitor]) {
+                    stopWallpaperEngine(monitor, false, "")
+                }
+                continue
+            }
+
+            const newSettings = getSceneSettings(newSceneId)
+
+            let oldSettings = null
+            if (processes[monitor] && processes[monitor].sceneId === oldSceneId) {
+                oldSettings = processes[monitor].settings
+            }
+
+            const sceneChanged = newSceneId !== oldSceneId
+            const settingsChanged = !deepEqual(newSettings || {}, oldSettings || {})
+
+            if (sceneChanged || settingsChanged) {
+                launchWallpaperEngine(monitor, newSceneId)
+            }
         }
 
         monitorScenes = newScenes
@@ -86,14 +124,24 @@ PluginComponent {
                     "linux-wallpaperengine",
                     "--screen-root", monitor,
                     "--screenshot", screenshotPath,
+                    "--screenshot-delay", 15,
                     "--bg", sceneId
                 ]
 
                 if (settings.silent !== false) {
                     args.push("--silent")
+                } else {
+                    var volume = settings.volume
+                    if (volume === undefined || volume === null) {
+                        volume = 50
+                    }
+
+                    args.push("--volume")
+                    args.push(String(volume))
                 }
 
                 var fps = settings.fps || 30
+
                 if (fps !== 30) {
                     args.push("--fps")
                     args.push(String(fps))
@@ -110,7 +158,6 @@ PluginComponent {
                     args.push("--set-property")
                     args.push(propName + "=" + sceneProps[propName])
                 }
-
                 return args
             }
 
@@ -131,9 +178,10 @@ PluginComponent {
             property string newSceneId: ""
 
             command: [
-                "pkill", "-f",
-                "linux-wallpaperengine --screen-root " + monitor
+                "sh", "-c",
+                "pgrep -f 'linux-wallpaperengine.*screen-root " + monitor + "' | xargs -r kill"
             ]
+
 
             onExited: () => {
                 if (startNew) {
@@ -182,17 +230,18 @@ PluginComponent {
 
             onTriggered: {
                 console.info("Set wp on", monitor, "to", screenshotPath)
-                SessionData.setMonitorWallpaper(monitor, screenshotPath)
-
-                if (monitor === mainMonitor) {
-                    console.info("Setting main wallpaper to", screenshotPath)
-                    SessionData.setWallpaper(screenshotPath)
+                if (!SessionData.perMonitorWallpaper) {
+                    SessionData.setPerMonitorWallpaper(enabled)
                 }
+                SessionData.setMonitorWallpaper(monitor, screenshotPath)
             }
         }
     }
 
     Component.onCompleted: {
+        if !SessionData.perMonitorWallpaper {
+            SessionData.setPerMonitorWallpaper(enabled)
+        }
         console.info("LinuxWallpaperEngine: Plugin started")
         syncScenesWithData()
     }
