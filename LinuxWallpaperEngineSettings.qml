@@ -130,35 +130,63 @@ PluginSettings {
             layer.enabled: true
         }
 
-        CachingImage {
+        AnimatedImage {
             id: previewImage
             anchors.fill: parent
             anchors.margins: 1
+
             property var weExtensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tga"]
             property int weExtIndex: 0
-            source: {
-                var sceneId = getCurrentSceneId()
-                if (sceneId) {
-                    var fullPath = "file://" + steamWorkshopPath + "/" + sceneId + "/preview" + weExtensions[weExtIndex]
-                    return fullPath
-                }
-                return ""
+            property string sceneId: ""
+
+            Binding {
+                target: previewImage
+                property: "sceneId"
+                value: getCurrentSceneId()
             }
+
+            function updateSource() {
+                if (!sceneId) {
+                    source = ""
+                    visible = false
+                    return
+                }
+
+                source = "file://" + steamWorkshopPath + "/" + sceneId + "/preview" + weExtensions[weExtIndex]
+            }
+
+            onSceneIdChanged: {
+                weExtIndex = 0
+                visible = false
+                updateSource()
+            }
+
             onStatusChanged: {
-                var sceneId = getCurrentSceneId()
-                if (sceneId && status === Image.Error) {
+                if (!sceneId) return
+
+                if (status === Image.Error) {
                     if (weExtIndex < weExtensions.length - 1) {
                         weExtIndex++
+                        updateSource()
                     } else {
                         visible = false
                     }
                 } else if (status === Image.Ready) {
                     visible = true
+                    if (weExtensions[weExtIndex] === ".gif" || source.toLowerCase().endsWith(".gif")) {
+                        // workaround for Qt turning playing off after static images
+                        playing = false
+                        currentFrame = 0
+                        playing = true
+                    }
                 }
             }
+
             fillMode: Image.PreserveAspectCrop
-            visible: true
-            maxCacheSize: 160
+
+            playing: true
+            paused: false
+
             layer.enabled: true
             layer.effect: MultiEffect {
                 maskEnabled: true
@@ -167,6 +195,7 @@ PluginSettings {
                 maskSpreadAtMin: 1
             }
         }
+
 
         StyledText {
             anchors.centerIn: parent
@@ -268,10 +297,16 @@ PluginSettings {
             }
 
             DankDropdown {
+                id: scalingDropdown
                 width: parent.width - 100 - Theme.spacingM
                 options: ["default", "stretch", "fit", "fill"]
-                currentValue: getSceneSetting("scaling", "default")
                 compactMode: true
+
+                Binding {
+                    target: scalingDropdown
+                    property: "currentValue"
+                    value: getSceneSetting("scaling", "default")
+                }
 
                 onValueChanged: (value) => {
                     saveSceneSetting("scaling", value)
@@ -284,15 +319,12 @@ PluginSettings {
         width: parent.width
         height: fpsRow.implicitHeight
 
-        property int currentFpsValue: getSceneSetting("fps", 30)
-
         Timer {
             id: fpsDebounceTimer
             interval: 500
             repeat: false
             onTriggered: {
-                saveSceneSetting("fps", parent.currentFpsValue)
-                PluginService.setGlobalVar("linuxWallpaperEngine", "lastChange", Date.now())
+                saveSceneSetting("fps", Math.round(fpsSlider.value))
             }
         }
 
@@ -309,22 +341,27 @@ PluginSettings {
             }
 
             DankSlider {
+                id: fpsSlider
                 width: parent.width - 100 - Theme.spacingM - fpsValueText.width - Theme.spacingM
                 minimum: 10
                 maximum: 144
                 showValue: false
-                value: parent.parent.currentFpsValue
                 anchors.verticalCenter: parent.verticalCenter
 
+                Binding {
+                    target: fpsSlider
+                    property: "value"
+                    value: getSceneSetting("fps", 30)
+                }
+
                 onSliderValueChanged: (newValue) => {
-                    parent.parent.currentFpsValue = Math.round(value)
                     fpsDebounceTimer.restart()
                 }
             }
 
             StyledText {
                 id: fpsValueText
-                text: parent.parent.currentFpsValue
+                text: Math.round(fpsSlider.value)
                 font.pixelSize: Theme.fontSizeSmall
                 width: 40
                 anchors.verticalCenter: parent.verticalCenter
@@ -349,12 +386,75 @@ PluginSettings {
             }
 
             DankToggle {
-                checked: getSceneSetting("silent", true)
+                id: silentToggle
                 anchors.verticalCenter: parent.verticalCenter
+
+                Binding {
+                    target: silentToggle
+                    property: "checked"
+                    value: getSceneSetting("silent", true)
+                }
 
                 onToggled: {
                     saveSceneSetting("silent", checked)
                 }
+            }
+        }
+    }
+
+    // volume slider, hidden when silent is enabled
+    Item {
+        width: parent.width
+        height: volumeRow.implicitHeight
+        visible: !getSceneSetting("silent", true)
+
+        Timer {
+            id: volumeDebounceTimer
+            interval: 500
+            repeat: false
+            onTriggered: {
+                saveSceneSetting("volume", Math.round(volumeSlider.value))
+            }
+        }
+
+        Row {
+            id: volumeRow
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Volume:"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 100
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankSlider {
+                id: volumeSlider
+                width: parent.width - 100 - Theme.spacingM - volumeValueText.width - Theme.spacingM
+                minimum: 0
+                maximum: 100
+                showValue: false
+                anchors.verticalCenter: parent.verticalCenter
+
+                // live per-scene binding
+                Binding {
+                    target: volumeSlider
+                    property: "value"
+                    value: getSceneSetting("volume", 50)
+                }
+
+                onSliderValueChanged: (newValue) => {
+                    volumeDebounceTimer.restart()
+                }
+            }
+
+            StyledText {
+                id: volumeValueText
+                text: Math.round(volumeSlider.value)
+                font.pixelSize: Theme.fontSizeSmall
+                width: 40
+                anchors.verticalCenter: parent.verticalCenter
             }
         }
     }
@@ -404,7 +504,6 @@ PluginSettings {
         monitorScenes[selectedMonitor] = sceneId
         saveValue("monitorScenes", monitorScenes)
         sceneIdField.text = sceneId
-        PluginService.setGlobalVar("linuxWallpaperEngine", "lastChange", Date.now())
         var currentMonitor = selectedMonitor
         selectedMonitor = ""
         selectedMonitor = currentMonitor
@@ -415,7 +514,6 @@ PluginSettings {
         delete monitorScenes[selectedMonitor]
         saveValue("monitorScenes", monitorScenes)
         sceneIdField.text = ""
-        PluginService.setGlobalVar("linuxWallpaperEngine", "lastChange", Date.now())
     }
 
     function browseScenes() {
@@ -445,7 +543,6 @@ PluginSettings {
         }
         allSettings[sceneId][key] = value
         saveValue("sceneSettings", allSettings)
-        PluginService.setGlobalVar("linuxWallpaperEngine", "lastChange", Date.now())
     }
 
     SceneBrowserModal {

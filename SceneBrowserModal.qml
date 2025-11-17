@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import qs.Common
@@ -109,104 +110,173 @@ DankModal {
 
                 Rectangle {
                     width: parent.width
-                    height: Math.max(200, parent.height - searchField.height - sceneCountText.height - Theme.spacingM * 2)
+                    height: Math.max(220, parent.height - searchField.height - sceneCountText.height - Theme.spacingM * 2)
                     color: Theme.surface
                     radius: Theme.cornerRadius
-                    border.width: 1
+                    border.width: 0
                     border.color: Theme.outlineStrong
 
                     GridView {
                         id: sceneGrid
                         anchors.fill: parent
                         anchors.margins: Theme.spacingM
-                        cellWidth: 280
-                        cellHeight: 220
                         clip: true
                         model: filteredScenes
+
+                        // choose how many columns you want; this keeps math explicit
+                        property int columns: 6
+                        cellWidth: width / columns
+                        cellHeight: cellWidth + 2 * Theme.spacingS + 2 * Theme.fontSizeSmall + Theme.spacingS
 
                         ScrollBar.vertical: ScrollBar {
                             policy: ScrollBar.AsNeeded
                         }
 
-                        delegate: Rectangle {
+                        delegate: Item {
+                            id: sceneDelegate
                             required property var modelData
                             required property int index
 
-                            width: 260
-                            height: 200
-                            color: mouseArea.containsMouse ? Theme.surfaceContainerHighest : Theme.surfaceContainer
-                            radius: Theme.cornerRadius
-                            border.width: selectedSceneId === sceneData.sceneId ? 2 : 1
-                            border.color: selectedSceneId === sceneData.sceneId ? Theme.primary : Theme.outlineStrong
+                            width: sceneGrid.cellWidth
+                            height: sceneGrid.cellHeight
 
                             property var sceneData: modelData || {}
 
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: Theme.spacingS
-                                spacing: Theme.spacingS
+                            // when this delegate is reused for a different scene
+                            onSceneDataChanged: {
+                                previewImg.extIndex = 0
+                                previewImg.updateSource()
+                            }
 
-                                Rectangle {
-                                    width: parent.width
-                                    height: 140
-                                    radius: Theme.cornerRadius
-                                    color: Theme.surface
-                                    clip: true
+                            // the card, centered inside the cell
+                            Rectangle {
+                                id: card
+                                width: sceneGrid.cellWidth - Theme.spacingM
+                                height: sceneGrid.cellHeight - Theme.spacingM
+                                anchors.centerIn: parent
 
-                                    Image {
-                                        id: previewImg
-                                        anchors.fill: parent
-                                        property var extensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
-                                        property int extIndex: 0
-                                        source: {
-                                            if (parent.parent.parent.sceneData.sceneId) {
-                                                return "file://" + steamWorkshopPath + "/" + parent.parent.parent.sceneData.sceneId + "/preview" + extensions[extIndex]
+                                color: mouseArea.containsMouse ? Theme.surfaceContainerHighest : Theme.surfaceContainer
+                                radius: Theme.cornerRadius
+                                border.width: selectedSceneId === sceneData.sceneId ? 2 : 1
+                                border.color: selectedSceneId === sceneData.sceneId ? Theme.primary : Theme.outlineStrong
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: Theme.spacingS
+                                    spacing: Theme.spacingS
+
+                                    Rectangle {
+                                        id: previewFrame
+                                        width: parent.width
+                                        height: width            // square preview
+                                        radius: Theme.cornerRadius
+                                        color: "transparent"
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: previewFrame.radius
+                                            color: Theme.surface
+                                        }
+
+                                        Rectangle {
+                                            id: wallpaperMask
+                                            anchors.fill: parent
+                                            anchors.margins: 1
+                                            radius: Theme.cornerRadius - 1
+                                            color: "black"
+                                            visible: false
+                                            layer.enabled: true
+                                        }
+
+                                        AnimatedImage {
+                                            id: previewImg
+                                            anchors.fill: parent
+                                            playing: true
+                                            fillMode: Image.PreserveAspectCrop
+                                            cache: true
+                                            asynchronous: true
+
+                                            property var extensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
+                                            property int extIndex: 0
+
+                                            function sceneId() {
+                                                return sceneDelegate.sceneData.sceneId || ""
                                             }
-                                            return ""
-                                        }
-                                        onStatusChanged: {
-                                            if (status === Image.Error && extIndex < extensions.length - 1) {
-                                                extIndex++
+
+                                            function updateSource() {
+                                                const sid = sceneId()
+                                                if (!sid || extIndex < 0 || extIndex >= extensions.length) {
+                                                    source = ""
+                                                    return
+                                                }
+                                                source = "file://" + steamWorkshopPath + "/" + sid + "/preview" + extensions[extIndex]
+                                            }
+
+                                            Component.onCompleted: updateSource()
+
+                                            onStatusChanged: {
+                                                if (status === Image.Error) {
+                                                    if (extIndex < extensions.length - 1) {
+                                                        extIndex += 1
+                                                        updateSource()
+                                                    }
+                                                } else if (status === Image.Ready) {
+                                                    const url = source.toLowerCase()
+                                                    const isGif = url.endsWith(".gif")
+                                                    if (isGif) {
+                                                        playing = false
+                                                        currentFrame = 0
+                                                        playing = true
+                                                    } else {
+                                                        playing = false
+                                                    }
+                                                }
+                                            }
+
+                                            StyledText {
+                                                anchors.centerIn: parent
+                                                text: "No Preview"
+                                                opacity: 0.5
+                                                visible: previewImg.status !== Image.Ready
+                                            }
+
+                                            layer.enabled: true
+                                            layer.effect: MultiEffect {
+                                                maskEnabled: true
+                                                maskSource: wallpaperMask
                                             }
                                         }
-                                        fillMode: Image.PreserveAspectCrop
-                                        asynchronous: true
+                                    }
 
-                                        StyledText {
-                                            anchors.centerIn: parent
-                                            text: "No Preview"
-                                            opacity: 0.5
-                                            visible: previewImg.status !== Image.Ready
-                                        }
+                                    StyledText {
+                                        width: parent.width
+                                        text: sceneDelegate.sceneData.name || sceneDelegate.sceneData.sceneId || ""
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        font.weight: Font.Medium
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                    }
+
+                                    StyledText {
+                                        width: parent.width
+                                        text: "ID: " + (sceneDelegate.sceneData.sceneId || "")
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        opacity: 0.7
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
                                     }
                                 }
 
-                                StyledText {
-                                    width: parent.width
-                                    text: parent.parent.sceneData.name || parent.parent.sceneData.sceneId || ""
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    font.weight: Font.Medium
-                                    elide: Text.ElideRight
-                                }
-
-                                StyledText {
-                                    width: parent.width
-                                    text: "ID: " + (parent.parent.sceneData.sceneId || "")
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    opacity: 0.7
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            MouseArea {
-                                id: mouseArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    if (parent.sceneData.sceneId) {
-                                        selectedSceneId = parent.sceneData.sceneId
-                                        sceneSelected(selectedSceneId)
-                                        root.close()
+                                MouseArea {
+                                    id: mouseArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        if (sceneDelegate.sceneData.sceneId) {
+                                            selectedSceneId = sceneDelegate.sceneData.sceneId
+                                            sceneSelected(selectedSceneId)
+                                            root.close()
+                                        }
                                     }
                                 }
                             }
