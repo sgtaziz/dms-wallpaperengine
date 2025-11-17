@@ -113,7 +113,7 @@ PluginSettings {
 
     StyledRect {
         width: parent.width
-        height: parent.width
+        height: 200
         radius: Theme.cornerRadius
         color: Theme.surfaceContainer
         border.width: 1
