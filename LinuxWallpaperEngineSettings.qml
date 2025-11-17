@@ -479,20 +479,23 @@ PluginSettings {
         text: "About"
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
+        width: parent.width
     }
 
     StyledText {
-        text: "This plugin uses linux-wallpaperengine to run animated Steam Workshop wallpapers."
+        text: "This plugin uses linux-wallpaperengine to run animated Wallpaper Engine wallpapers."
         font.pixelSize: Theme.fontSizeSmall
         opacity: 0.7
         wrapMode: Text.Wrap
+        width: parent.width
     }
 
     StyledText {
-        text: "The plugin takes a screenshot of the animated wallpaper and uses it for static contexts (lock screen, color extraction). This will OVERWRITE your current wallpaper settings."
+        text: "A screenshot of the animated wallpaper will be taken and used for static contexts (lock screen, color extraction). This will OVERWRITE your current wallpaper settings."
         font.pixelSize: Theme.fontSizeSmall
         opacity: 0.7
         wrapMode: Text.Wrap
+        width: parent.width
     }
 
     function getCurrentSceneId() {
