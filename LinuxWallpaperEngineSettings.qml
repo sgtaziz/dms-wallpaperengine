@@ -112,8 +112,9 @@ PluginSettings {
     }
 
     StyledRect {
-        width: parent.width
-        height: 200
+        width: 250
+        height: 250
+        anchors.horizontalCenter: parent.horizontalCenter
         radius: Theme.cornerRadius
         color: Theme.surfaceContainer
         border.width: 1
