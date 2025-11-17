@@ -319,13 +319,18 @@ DankModal {
         filteredScenes.clear()
 
         // Use bash script with jq to map sceneId => name
+        // Falls back to just listing scene IDs if jq is not installed
         sceneScanProcess.command = ["bash", "-c",
             `cd "${steamWorkshopPath}" && for dir in */; do
                 id="\${dir%/}"
-                if [[ "$id" =~ ^[0-9]+$ ]] && [[ -f "$id/project.json" ]]; then
-                    title=$(jq -r '.title // empty' "$id/project.json" 2>/dev/null)
-                    if [[ -n "$title" ]]; then
-                        echo "$id|$title"
+                if [[ "$id" =~ ^[0-9]+$ ]]; then
+                    if command -v jq >/dev/null 2>&1 && [[ -f "$id/project.json" ]]; then
+                        title=$(jq -r '.title // empty' "$id/project.json" 2>/dev/null)
+                        if [[ -n "$title" ]]; then
+                            echo "$id|$title"
+                        else
+                            echo "$id|$id"
+                        fi
                     else
                         echo "$id|$id"
                     fi
