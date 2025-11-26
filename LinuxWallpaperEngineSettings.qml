@@ -174,7 +174,7 @@ PluginSettings {
                     }
                 } else if (status === Image.Ready) {
                     visible = true
-                    if (weExtensions[weExtIndex] === ".gif" || source.toLowerCase().endsWith(".gif")) {
+                    if (weExtensions[weExtIndex] === ".gif" || source.toString().toLowerCase().endsWith(".gif")) {
                         // workaround for Qt turning playing off after static images
                         playing = false
                         currentFrame = 0
