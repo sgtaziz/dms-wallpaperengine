@@ -95,6 +95,32 @@ PluginComponent {
         return allSettings[sceneId] || {}
     }
 
+    function getSteamWorkshopPath() {
+        const homePath = StandardPaths.writableLocation(StandardPaths.HomeLocation).toString()
+        const baseHome = Paths.strip(homePath)
+
+        const steamPaths = [
+            baseHome + "/.local/share/Steam/steamapps/workshop/content/431960",
+            baseHome + "/.steam/steam/steamapps/workshop/content/431960",
+            baseHome + "/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960",
+            baseHome + "/snap/steam/common/.local/share/Steam/steamapps/workshop/content/431960"
+        ]
+
+        return steamPaths[0]
+    }
+
+    function findPreviewImage(sceneId) {
+        const workshopPath = getSteamWorkshopPath()
+        const extensions = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
+
+        for (const ext of extensions) {
+            const previewPath = workshopPath + "/" + sceneId + "/preview" + ext
+            return previewPath
+        }
+
+        return ""
+    }
+
     function stopWallpaperEngine(monitor, startNew, newSceneId) {
         if (startNew === undefined) startNew = false
         if (newSceneId === undefined) newSceneId = ""
@@ -128,7 +154,6 @@ PluginComponent {
                 var args = [
                     "linux-wallpaperengine",
                     "--screen-root", monitor,
-                    "--screenshot", screenshotPath,
                     "--bg", sceneId
                 ]
 
@@ -162,6 +187,7 @@ PluginComponent {
                     args.push("--set-property")
                     args.push(propName + "=" + sceneProps[propName])
                 }
+                console.info("LinuxWallpaperEngine: Launching with command:", args.join(" "))
                 return args
             }
 
@@ -188,18 +214,13 @@ PluginComponent {
 
             onExited: () => {
                 if (startNew) {
-                    const cacheHome = StandardPaths.writableLocation(StandardPaths.GenericCacheLocation).toString()
-                    const baseDir = Paths.strip(cacheHome)
-                    const outDir = baseDir + "/DankMaterialShell/we_screenshots"
-                    const screenshotPath = outDir + "/" + newSceneId + ".jpg"
-
-                    Quickshell.execDetached(["mkdir", "-p", outDir])
+                    const previewImagePath = findPreviewImage(newSceneId)
 
                     var sceneSettings = getSceneSettings(newSceneId)
                     var weProc = weProcessComponent.createObject(root, {
                         monitor: monitor,
                         sceneId: newSceneId,
-                        screenshotPath: screenshotPath,
+                        screenshotPath: "",
                         settings: sceneSettings
                     })
 
@@ -208,7 +229,7 @@ PluginComponent {
 
                     var setWallpaper = setWallpaperTimer.createObject(root, {
                         monitor: monitor,
-                        screenshotPath: screenshotPath,
+                        screenshotPath: previewImagePath,
                         mainMonitor: root.mainMonitor
                     })
                     setWallpaper.running = true
