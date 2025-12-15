@@ -549,25 +549,35 @@ PluginSettings {
         saveValue("sceneSettings", allSettings)
     }
 
-    SceneBrowserModal {
-        id: sceneBrowser
-        steamWorkshopPath: root.steamWorkshopPath
+    // These modals don't render inside the settings page, but if they're direct children of
+    // PluginSettings they still get laid out by PluginSettings' internal Column, adding a large
+    // blank area to the bottom of the settings view. Mount them inside a 0-sized invisible Item.
+    Item {
+        id: modalMount
+        width: 0
+        height: 0
+        visible: false
 
-        onSceneSelected: (sceneId) => {
-            setScene(sceneId)
+        SceneBrowserModal {
+            id: sceneBrowser
+            steamWorkshopPath: root.steamWorkshopPath
+
+            onSceneSelected: (sceneId) => {
+                setScene(sceneId)
+            }
         }
-    }
 
-    ScenePropertiesModal {
-        id: propertiesModal
-        pluginSettings: root
+        ScenePropertiesModal {
+            id: propertiesModal
+            pluginSettings: root
 
-        onOpened: {
-            sceneId = getCurrentSceneId()
-        }
+            onOpened: {
+                sceneId = getCurrentSceneId()
+            }
 
-        onPropertiesSaved: (props) => {
-            saveSceneSetting("properties", props)
+            onPropertiesSaved: (props) => {
+                saveSceneSetting("properties", props)
+            }
         }
     }
 }
