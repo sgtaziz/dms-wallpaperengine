@@ -18,8 +18,12 @@ DankModal {
 
     signal sceneSelected(string sceneId)
 
-    width: Math.min(screenWidth - 100, 1200)
-    height: Math.min(screenHeight - 100, 800)
+    // DankMaterialShell uses modalWidth/modalHeight for the actual window size.
+    // Keep width/height in sync for any content that relies on them.
+    modalWidth: Math.min(screenWidth - 100, 1200)
+    modalHeight: Math.min(screenHeight - 100, 800)
+    width: modalWidth
+    height: modalHeight
     positioning: "center"
     allowStacking: true
 
