@@ -11,6 +11,8 @@ PluginComponent {
 
     property var monitorScenes: pluginData.monitorScenes || {}
     property var processes: ({})
+    property bool generateStaticWallpaper: pluginData.generateStaticWallpaper || false
+    property bool prevGenerateStaticWallpaper: false
     property string mainMonitor: {
         const monitors = Object.keys(monitorScenes)
         return monitors.length > 0 ? monitors[0] : ""
@@ -18,6 +20,20 @@ PluginComponent {
 
     onPluginDataChanged: {
         syncScenesWithData()
+    }
+
+    onGenerateStaticWallpaperChanged: {
+        // Only restart if this is a real change (not initial load)
+        if (prevGenerateStaticWallpaper !== generateStaticWallpaper) {
+            prevGenerateStaticWallpaper = generateStaticWallpaper
+            // Restart all monitors with their current scenes
+            for (const monitor in monitorScenes) {
+                const sceneId = monitorScenes[monitor]
+                if (sceneId) {
+                    launchWallpaperEngine(monitor, sceneId)
+                }
+            }
+        }
     }
 
     function escapeRegex(str) {
@@ -122,15 +138,22 @@ PluginComponent {
             property string monitor: ""
             property string sceneId: ""
             property string screenshotPath: ""
+            property bool useScreenshot: false
             property var settings: ({})
 
             command: {
                 var args = [
                     "linux-wallpaperengine",
-                    "--screen-root", monitor,
-                    "--screenshot", screenshotPath,
-                    "--bg", sceneId
+                    "--screen-root", monitor
                 ]
+
+                if (useScreenshot && screenshotPath) {
+                    args.push("--screenshot")
+                    args.push(screenshotPath)
+                }
+
+                args.push("--bg")
+                args.push(sceneId)
 
                 if (settings.silent !== false) {
                     args.push("--silent")
@@ -188,30 +211,38 @@ PluginComponent {
 
             onExited: () => {
                 if (startNew) {
-                    const cacheHome = StandardPaths.writableLocation(StandardPaths.GenericCacheLocation).toString()
-                    const baseDir = Paths.strip(cacheHome)
-                    const outDir = baseDir + "/DankMaterialShell/we_screenshots"
-                    const screenshotPath = outDir + "/" + newSceneId + ".jpg"
+                    const useScreenshot = root.generateStaticWallpaper
+                    var screenshotPath = ""
 
-                    Quickshell.execDetached(["mkdir", "-p", outDir])
+                    if (useScreenshot) {
+                        const cacheHome = StandardPaths.writableLocation(StandardPaths.GenericCacheLocation).toString()
+                        const baseDir = Paths.strip(cacheHome)
+                        const outDir = baseDir + "/DankMaterialShell/we_screenshots"
+                        screenshotPath = outDir + "/" + newSceneId + ".jpg"
+
+                        Quickshell.execDetached(["mkdir", "-p", outDir])
+                    }
 
                     var sceneSettings = getSceneSettings(newSceneId)
                     var weProc = weProcessComponent.createObject(root, {
                         monitor: monitor,
                         sceneId: newSceneId,
                         screenshotPath: screenshotPath,
+                        useScreenshot: useScreenshot,
                         settings: sceneSettings
                     })
 
                     processes[monitor] = weProc
                     weProc.running = true
 
-                    var setWallpaper = setWallpaperTimer.createObject(root, {
-                        monitor: monitor,
-                        screenshotPath: screenshotPath,
-                        mainMonitor: root.mainMonitor
-                    })
-                    setWallpaper.running = true
+                    if (useScreenshot) {
+                        var setWallpaper = setWallpaperTimer.createObject(root, {
+                            monitor: monitor,
+                            screenshotPath: screenshotPath,
+                            mainMonitor: root.mainMonitor
+                        })
+                        setWallpaper.running = true
+                    }
                 }
 
                 destroy()
@@ -243,6 +274,7 @@ PluginComponent {
 
     Component.onCompleted: {
         console.info("LinuxWallpaperEngine: Plugin started")
+        prevGenerateStaticWallpaper = generateStaticWallpaper
         syncScenesWithData()
     }
 

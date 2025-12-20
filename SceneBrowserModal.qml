@@ -225,7 +225,7 @@ DankModal {
                                                         updateSource()
                                                     }
                                                 } else if (status === Image.Ready) {
-                                                    const url = source.toLowerCase()
+                                                    const url = source.toString().toLowerCase()
                                                     const isGif = url.endsWith(".gif")
                                                     if (isGif) {
                                                         playing = false

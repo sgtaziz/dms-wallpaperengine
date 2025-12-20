@@ -174,7 +174,7 @@ PluginSettings {
                     }
                 } else if (status === Image.Ready) {
                     visible = true
-                    if (weExtensions[weExtIndex] === ".gif" || source.toLowerCase().endsWith(".gif")) {
+                    if (weExtensions[weExtIndex] === ".gif" || source.toString().toLowerCase().endsWith(".gif")) {
                         // workaround for Qt turning playing off after static images
                         playing = false
                         currentFrame = 0
@@ -476,6 +476,68 @@ PluginSettings {
     }
 
     StyledText {
+        text: "Static Wallpaper Generation"
+        font.pixelSize: Theme.fontSizeMedium
+        font.weight: Font.Medium
+        width: parent.width
+    }
+
+    Item {
+        width: parent.width
+        height: staticWallpaperRow.implicitHeight
+
+        Row {
+            id: staticWallpaperRow
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Generate static wallpaper:"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankToggle {
+                id: staticWallpaperToggle
+                anchors.verticalCenter: parent.verticalCenter
+
+                Binding {
+                    target: staticWallpaperToggle
+                    property: "checked"
+                    value: loadValue("generateStaticWallpaper", false)
+                }
+
+                onToggled: (checked) => {
+                    saveValue("generateStaticWallpaper", checked)
+                }
+            }
+        }
+    }
+
+    StyledText {
+        text: "When enabled, a screenshot of the animated wallpaper will be captured and used for lock screen and theme color extraction. This will overwrite your current wallpaper settings."
+        font.pixelSize: Theme.fontSizeSmall
+        opacity: 0.7
+        wrapMode: Text.Wrap
+        width: parent.width
+    }
+
+    StyledText {
+        text: "Warning: This feature may cause system crashes on some configurations."
+        font.pixelSize: Theme.fontSizeSmall
+        opacity: 0.5
+        wrapMode: Text.Wrap
+        width: parent.width
+    }
+
+    Rectangle {
+        width: parent.width
+        height: 1
+        color: Theme.outlineStrong
+    }
+
+    StyledText {
         text: "About"
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
@@ -484,14 +546,6 @@ PluginSettings {
 
     StyledText {
         text: "This plugin uses linux-wallpaperengine to run animated Wallpaper Engine wallpapers."
-        font.pixelSize: Theme.fontSizeSmall
-        opacity: 0.7
-        wrapMode: Text.Wrap
-        width: parent.width
-    }
-
-    StyledText {
-        text: "A screenshot of the animated wallpaper will be taken and used for static contexts (lock screen, color extraction). This will OVERWRITE your current wallpaper settings."
         font.pixelSize: Theme.fontSizeSmall
         opacity: 0.7
         wrapMode: Text.Wrap
