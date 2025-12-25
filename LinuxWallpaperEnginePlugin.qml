@@ -17,9 +17,40 @@ PluginComponent {
         const monitors = Object.keys(monitorScenes)
         return monitors.length > 0 ? monitors[0] : ""
     }
+    property var previousScreenNames: []
 
     onPluginDataChanged: {
         syncScenesWithData()
+    }
+
+    // Watch for display hotplug events (connect/disconnect)
+    Connections {
+        target: Quickshell
+
+        function onScreensChanged() {
+            const currentScreenNames = Quickshell.screens.map(screen => screen.name)
+
+            // Find disconnected screens and stop their processes
+            const removedScreens = previousScreenNames.filter(name => !currentScreenNames.includes(name))
+            for (const screenName of removedScreens) {
+                if (processes[screenName]) {
+                    console.info("LinuxWallpaperEngine: Display disconnected:", screenName, "- stopping scene")
+                    stopWallpaperEngine(screenName, false, "")
+                }
+            }
+
+            // Find newly connected screens and restore their scenes
+            const newScreens = currentScreenNames.filter(name => !previousScreenNames.includes(name))
+            for (const screenName of newScreens) {
+                const sceneId = monitorScenes[screenName]
+                if (sceneId) {
+                    console.info("LinuxWallpaperEngine: Display connected:", screenName, "- restoring scene:", sceneId)
+                    launchWallpaperEngine(screenName, sceneId)
+                }
+            }
+
+            previousScreenNames = currentScreenNames
+        }
     }
 
     onGenerateStaticWallpaperChanged: {
@@ -275,6 +306,8 @@ PluginComponent {
     Component.onCompleted: {
         console.info("LinuxWallpaperEngine: Plugin started")
         prevGenerateStaticWallpaper = generateStaticWallpaper
+        // Initialize screen tracking for hotplug detection
+        previousScreenNames = Quickshell.screens.map(screen => screen.name)
         syncScenesWithData()
     }
 
