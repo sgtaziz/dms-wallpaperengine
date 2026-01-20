@@ -233,6 +233,15 @@ PluginComponent {
                     args.push("--set-property")
                     args.push(propName + "=" + sceneProps[propName])
                 }
+
+                if (settings.disableParticles) args.push("--disable-particles")
+                if (settings.disableMouse) args.push("--disable-mouse")
+                if (settings.disableParallax) args.push("--disable-parallax")
+                if (settings.noAutoMute) args.push("--noautomute")
+                if (settings.noAudioProcessing) args.push("--no-audio-processing")
+                if (settings.noFullscreenPause) args.push("--no-fullscreen-pause")
+                if (settings.fullscreenPauseOnlyActive) args.push("--fullscreen-pause-only-active")
+
                 return args
             }
 

@@ -476,6 +476,129 @@ PluginSettings {
     }
 
     StyledText {
+        text: "Advanced Settings"
+        font.pixelSize: Theme.fontSizeMedium
+        font.weight: Font.Medium
+    }
+
+    Column {
+        width: parent.width
+        spacing: Theme.spacingM
+
+        Component {
+            id: settingGroupComponent
+            Column {
+                property string title: ""
+                width: parent.width
+                spacing: Theme.spacingS
+
+                StyledText {
+                    text: title
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.weight: Font.Bold
+                    opacity: 0.8
+                }
+            }
+        }
+
+        Component {
+            id: toggleItemComponent
+            Column {
+                property string label: ""
+                property string description: ""
+                property string settingKey: ""
+                property bool defaultVal: false
+                width: parent.width
+                spacing: 2
+
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingM
+                    StyledText {
+                        text: label
+                        font.pixelSize: Theme.fontSizeSmall
+                        width: 180
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    DankToggle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        checked: getSceneSetting(settingKey, defaultVal)
+                        onToggled: (checked) => {
+                            saveSceneSetting(settingKey, checked)
+                        }
+                    }
+                }
+                StyledText {
+                    text: description
+                    font.pixelSize: Theme.fontSizeSmall * 0.9
+                    opacity: 0.5
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                }
+            }
+        }
+
+        function createGroup(title, items) {
+            var group = settingGroupComponent.createObject(this, { title: title })
+            for (var i = 0; i < items.length; i++) {
+                toggleItemComponent.createObject(group, items[i])
+            }
+        }
+
+        Component.onCompleted: {
+            createGroup("Performance & Rendering", [
+                {
+                    label: "Disable Particles",
+                    description: "Disables particles for the backgrounds",
+                    settingKey: "disableParticles"
+                },
+                {
+                    label: "Disable Parallax",
+                    description: "Disables parallax effect for the backgrounds",
+                    settingKey: "disableParallax"
+                },
+                {
+                    label: "No Fullscreen Pause",
+                    description: "Prevents the background pausing when an app is fullscreen",
+                    settingKey: "noFullscreenPause"
+                },
+                {
+                    label: "Pause Only Active",
+                    description: "Wayland only: pause only when a fullscreen window is active (activated)",
+                    settingKey: "fullscreenPauseOnlyActive"
+                }
+            ])
+
+            createGroup("Audio", [
+                {
+                    label: "No Auto Mute",
+                    description: "Disables the automute when an app is playing sound",
+                    settingKey: "noAutoMute"
+                },
+                {
+                    label: "No Audio Processing",
+                    description: "Disables audio processing for backgrounds",
+                    settingKey: "noAudioProcessing"
+                }
+            ])
+
+            createGroup("Interaction", [
+                {
+                    label: "Disable Mouse",
+                    description: "Disables mouse interaction with the backgrounds",
+                    settingKey: "disableMouse"
+                }
+            ])
+        }
+    }
+
+    Rectangle {
+        width: parent.width
+        height: 1
+        color: Theme.outlineStrong
+    }
+
+    StyledText {
         text: "Static Wallpaper Generation"
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
