@@ -15,6 +15,7 @@ DankModal {
     property var sceneList: []
     property string selectedSceneId: ""
     property string searchText: ""
+    property bool addToPlaylistMode: false
 
     signal sceneSelected(string sceneId)
 
@@ -315,7 +316,6 @@ DankModal {
 
     function scanScenes() {
         if (!steamWorkshopPath) {
-            console.warn("No Steam Workshop path set")
             return
         }
 

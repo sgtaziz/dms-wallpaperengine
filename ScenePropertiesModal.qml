@@ -465,11 +465,8 @@ DankModal {
 
         onExited: (code) => {
             if (code === 0 && propertiesOutput) {
-                console.info("Properties output for scene", sceneId + ":")
-                console.info(propertiesOutput)
                 parseProperties(propertiesOutput)
             } else {
-                console.warn("Failed to load properties for scene", sceneId, "exit code:", code)
                 properties = []
             }
             propertiesOutput = ""
@@ -479,8 +476,6 @@ DankModal {
     function parseProperties(output) {
         const lines = output.trim().split('\n')
         const parsedProperties = []
-
-        console.info("Parsing", lines.length, "lines")
 
         let currentProperty = null
 
@@ -526,11 +521,6 @@ DankModal {
 
         if (currentProperty) {
             parsedProperties.push(currentProperty)
-        }
-
-        console.info("Total parsed properties:", parsedProperties.length)
-        for (const prop of parsedProperties) {
-            console.info("Parsed property:", JSON.stringify(prop))
         }
 
         properties = parsedProperties

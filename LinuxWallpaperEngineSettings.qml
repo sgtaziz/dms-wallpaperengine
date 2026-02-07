@@ -16,6 +16,18 @@ PluginSettings {
 
     property var monitors: Quickshell.screens.map(screen => screen.name)
     property string selectedMonitor: monitors.length > 0 ? monitors[0] : ""
+    property int playlistVersion: 0
+    property int currentSceneRefresh: 0
+
+    Connections {
+        target: pluginService
+        enabled: pluginService !== null
+        function onPluginDataChanged(changedPluginId) {
+            if (changedPluginId === pluginId) {
+                currentSceneRefresh++
+            }
+        }
+    }
 
     property var steamPaths: {
         var homePath = StandardPaths.writableLocation(StandardPaths.HomeLocation).toString()
@@ -36,6 +48,10 @@ PluginSettings {
 
     Component.onCompleted: {
         discoverSteamPath()
+    }
+
+    onSelectedMonitorChanged: {
+        playlistVersion++
     }
 
     function discoverSteamPath() {
@@ -106,7 +122,10 @@ PluginSettings {
     }
 
     StyledText {
-        text: "Current Scene: " + (getCurrentSceneId() || "None")
+        text: {
+            currentSceneRefresh
+            return "Current Scene: " + (getCurrentSceneId() || "None")
+        }
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
     }
@@ -143,7 +162,10 @@ PluginSettings {
             Binding {
                 target: previewImage
                 property: "sceneId"
-                value: getCurrentSceneId()
+                value: {
+                    root.currentSceneRefresh
+                    return root.getCurrentSceneId()
+                }
             }
 
             function updateSource() {
@@ -236,6 +258,140 @@ PluginSettings {
     }
 
     StyledText {
+        text: "Playlist"
+        font.pixelSize: Theme.fontSizeMedium
+        font.weight: Font.Medium
+    }
+
+    StyledText {
+        text: "Add multiple scenes to rotate at the configured interval"
+        font.pixelSize: Theme.fontSizeSmall
+        opacity: 0.7
+        wrapMode: Text.Wrap
+    }
+
+    Row {
+        width: parent.width
+        spacing: Theme.spacingM
+
+        DankButton {
+            text: "Add to Playlist"
+            width: (parent.width - Theme.spacingM) / 2
+            onClicked: {
+                sceneBrowser.addToPlaylistMode = true
+                sceneBrowser.open()
+            }
+        }
+
+        DankButton {
+            text: "Clear Playlist"
+            width: (parent.width - Theme.spacingM) / 2
+            enabled: getPlaylist().length > 0
+            onClicked: {
+                clearPlaylist()
+            }
+        }
+    }
+
+    Repeater {
+        model: {
+            var v = playlistVersion
+            return getPlaylist()
+        }
+
+        delegate: StyledRect {
+            required property string modelData
+            required property int index
+            width: parent.width - Theme.spacingM
+            height: playlistItemRow.implicitHeight + Theme.spacingS * 2
+            radius: Theme.cornerRadius
+            color: Theme.surfaceContainerHigh
+
+            Row {
+                id: playlistItemRow
+                anchors.fill: parent
+                anchors.margins: Theme.spacingS
+                spacing: Theme.spacingS
+
+                Rectangle {
+                    width: 36
+                    height: 36
+                    radius: 4
+                    color: Theme.surface
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Image {
+                        id: itemPreview
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        fillMode: Image.PreserveAspectCrop
+                        cache: true
+                        asynchronous: true
+
+                        property var extensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tga"]
+                        property int extIndex: 0
+
+                        function updateSource() {
+                            if (!modelData || extIndex < 0 || extIndex >= extensions.length) {
+                                source = ""
+                                return
+                            }
+                            source = "file://" + root.steamWorkshopPath + "/" + modelData + "/preview" + extensions[extIndex]
+                        }
+
+                        Component.onCompleted: updateSource()
+
+                        onStatusChanged: {
+                            if (status === Image.Error && extIndex < extensions.length - 1) {
+                                extIndex++
+                                updateSource()
+                            }
+                        }
+                    }
+                }
+
+                StyledText {
+                    text: modelData
+                    font.pixelSize: Theme.fontSizeSmall
+                    width: parent.width - 70 - Theme.spacingS - 36 - Theme.spacingS
+                    elide: Text.ElideRight
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                DankButton {
+                    text: "Remove"
+                    onClicked: {
+                        removeFromPlaylist(index)
+                    }
+                }
+            }
+        }
+    }
+
+    ToggleSetting {
+        settingKey: "playlistShuffle"
+        label: "Shuffle"
+        description: "Play scenes in random order"
+        defaultValue: false
+    }
+
+    SliderSetting {
+        settingKey: "playlistIntervalMinutes"
+        label: "Interval (minutes)"
+        description: "Time between wallpaper changes"
+        defaultValue: 5
+        minimum: 1
+        maximum: 120
+        unit: "min"
+    }
+
+    Rectangle {
+        width: parent.width
+        height: 1
+        color: Theme.outlineStrong
+    }
+
+    StyledText {
         text: "Scene ID"
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
@@ -254,9 +410,12 @@ PluginSettings {
 
         DankTextField {
             id: sceneIdField
-            width: parent.width - applyButton.width - Theme.spacingM
+            width: parent.width - applyButton.width - addToPlaylistButton.width - Theme.spacingM * 2
             placeholderText: "e.g., 1234567890"
-            text: getCurrentSceneId() || ""
+            text: {
+                root.currentSceneRefresh
+                return root.getCurrentSceneId() || ""
+            }
         }
 
         DankButton {
@@ -265,6 +424,15 @@ PluginSettings {
             enabled: sceneIdField.text.trim() !== ""
             onClicked: {
                 setScene(sceneIdField.text.trim())
+            }
+        }
+
+        DankButton {
+            id: addToPlaylistButton
+            text: "Add"
+            enabled: sceneIdField.text.trim() !== ""
+            onClicked: {
+                addToPlaylist(sceneIdField.text.trim())
             }
         }
     }
@@ -680,7 +848,17 @@ PluginSettings {
         return monitorScenes[selectedMonitor] || ""
     }
 
+    function getPlaylist() {
+        var playlists = loadValue("monitorPlaylists", {})
+        var list = playlists[selectedMonitor]
+        return Array.isArray(list) ? list : []
+    }
+
     function setScene(sceneId) {
+        var playlists = loadValue("monitorPlaylists", {})
+        delete playlists[selectedMonitor]
+        saveValue("monitorPlaylists", playlists)
+        playlistVersion++
         var monitorScenes = loadValue("monitorScenes", {})
         monitorScenes[selectedMonitor] = sceneId
         saveValue("monitorScenes", monitorScenes)
@@ -694,10 +872,66 @@ PluginSettings {
         var monitorScenes = loadValue("monitorScenes", {})
         delete monitorScenes[selectedMonitor]
         saveValue("monitorScenes", monitorScenes)
+        var playlists = loadValue("monitorPlaylists", {})
+        delete playlists[selectedMonitor]
+        saveValue("monitorPlaylists", playlists)
         sceneIdField.text = ""
+        playlistVersion++
+    }
+
+    function addToPlaylist(sceneId) {
+        var playlists = loadValue("monitorPlaylists", {})
+        if (!playlists[selectedMonitor]) {
+            playlists[selectedMonitor] = []
+        }
+        playlists[selectedMonitor].push(sceneId)
+        saveValue("monitorPlaylists", playlists)
+        var monitorScenes = loadValue("monitorScenes", {})
+        monitorScenes[selectedMonitor] = sceneId
+        saveValue("monitorScenes", monitorScenes)
+        sceneIdField.text = sceneId
+        playlistVersion++
+        var currentMonitor = selectedMonitor
+        selectedMonitor = ""
+        selectedMonitor = currentMonitor
+    }
+
+    function removeFromPlaylist(index) {
+        var playlists = loadValue("monitorPlaylists", {})
+        var list = playlists[selectedMonitor]
+        if (!Array.isArray(list) || index < 0 || index >= list.length) return
+        list.splice(index, 1)
+        if (list.length === 0) {
+            delete playlists[selectedMonitor]
+            var monitorScenes = loadValue("monitorScenes", {})
+            delete monitorScenes[selectedMonitor]
+            saveValue("monitorScenes", monitorScenes)
+        } else {
+            playlists[selectedMonitor] = list
+            var monitorScenes = loadValue("monitorScenes", {})
+            monitorScenes[selectedMonitor] = list[0]
+            saveValue("monitorScenes", monitorScenes)
+        }
+        saveValue("monitorPlaylists", playlists)
+        playlistVersion++
+    }
+
+    function clearPlaylist() {
+        var playlists = loadValue("monitorPlaylists", {})
+        delete playlists[selectedMonitor]
+        saveValue("monitorPlaylists", playlists)
+        var monitorScenes = loadValue("monitorScenes", {})
+        delete monitorScenes[selectedMonitor]
+        saveValue("monitorScenes", monitorScenes)
+        sceneIdField.text = ""
+        playlistVersion++
+        var currentMonitor = selectedMonitor
+        selectedMonitor = ""
+        selectedMonitor = currentMonitor
     }
 
     function browseScenes() {
+        sceneBrowser.addToPlaylistMode = false
         sceneBrowser.open()
     }
 
@@ -740,7 +974,11 @@ PluginSettings {
             steamWorkshopPath: root.steamWorkshopPath
 
             onSceneSelected: (sceneId) => {
-                setScene(sceneId)
+                if (sceneBrowser.addToPlaylistMode) {
+                    addToPlaylist(sceneId)
+                } else {
+                    setScene(sceneId)
+                }
             }
         }
 
