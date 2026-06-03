@@ -14,7 +14,7 @@ PluginSettings {
     id: root
     pluginId: "linuxWallpaperEngine"
 
-    property var monitors: Quickshell.screens.map(screen => screen.name)
+    property var monitors: ["*", ...Quickshell.screens.map(screen => screen.name)]
     property string selectedMonitor: monitors.length > 0 ? monitors[0] : ""
     property int playlistVersion: 0
     property int currentSceneRefresh: 0
@@ -113,7 +113,7 @@ PluginSettings {
         width: parent.width
         options: root.monitors
         currentValue: root.selectedMonitor || "No monitors"
-        enabled: root.monitors.length > 1
+        enabled: root.monitors.length > 2
         compactMode: true
 
         onValueChanged: (value) => {

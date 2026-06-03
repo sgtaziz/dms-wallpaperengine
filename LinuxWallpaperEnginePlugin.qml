@@ -194,7 +194,7 @@ PluginComponent {
     }
 
     function syncScenesWithData() {
-        const connectedMonitors = Quickshell.screens.map(screen => screen.name)
+        const connectedMonitors = ["*", ...Quickshell.screens.map(screen => screen.name)]
         console.info("LinuxWallpaperEngine: Syncing scenes. Connected monitors:", JSON.stringify(connectedMonitors))
         const effectiveScenes = {}
         for (const monitor of connectedMonitors) {
@@ -231,7 +231,7 @@ PluginComponent {
             const sceneChanged = newSceneId !== oldSceneId
             const settingsChanged = !deepEqual(newSettings || {}, oldSettings || {})
             const processNotRunning = !processes[monitor]
-            const isPending = pendingLaunches[monitor]
+            const isPending = monitor == "*" ? false : pendingLaunches[monitor]
 
             console.info("LinuxWallpaperEngine: Monitor", monitor, "- sceneChanged:", sceneChanged, "settingsChanged:", settingsChanged, "processNotRunning:", processNotRunning, "isPending:", isPending)
 
@@ -260,22 +260,33 @@ PluginComponent {
         return allSettings[sceneId] || {}
     }
 
-    function stopWallpaperEngine(monitor, startNew, newSceneId) {
+    function stopWallpaperEngine(virtualMonitor, startNew, newSceneId) {
         if (startNew === undefined) startNew = false
         if (newSceneId === undefined) newSceneId = ""
 
-        if (processes[monitor]) {
-            processes[monitor].running = false
-            processes[monitor].destroy()
-            delete processes[monitor]
+        var monitors = [virtualMonitor];
+        if (virtualMonitor == "*") {
+            monitors = Quickshell.screens.map(screen => screen.name);
         }
 
-        var killerProc = killerComponent.createObject(root, {
-            monitor: monitor,
-            startNew: startNew,
-            newSceneId: newSceneId
-        })
-        killerProc.running = true
+        var isFirstMonitor = true;
+        for (const monitor of monitors) {
+            if (processes[monitor]) {
+                processes[monitor].running = false
+                processes[monitor].destroy()
+                delete processes[monitor]
+            }
+
+            var killerProc = killerComponent.createObject(root, {
+                monitor: monitor,
+                startNew: startNew,
+                newSceneId: newSceneId,
+                forceNoAudio: !isFirstMonitor
+            })
+            killerProc.running = true
+
+            isFirstMonitor = false;
+        }
     }
 
     Component {
@@ -289,6 +300,7 @@ PluginComponent {
             property string screenshotPath: ""
             property bool useScreenshot: false
             property var settings: ({})
+            property bool forceNoAudio: false
 
             command: {
                 var args = [
@@ -309,7 +321,7 @@ PluginComponent {
                 args.push("--bg")
                 args.push(sceneId)
 
-                if (settings.silent !== false) {
+                if (forceNoAudio || settings.silent !== false) {
                     args.push("--silent")
                 } else {
                     var volume = settings.volume
@@ -366,6 +378,7 @@ PluginComponent {
             property string monitor: ""
             property bool startNew: false
             property string newSceneId: ""
+            property bool forceNoAudio: false
 
             command: [
                 "pkill", "-f", ".*linux-wallpaperengine.*--screen-root " + escapeRegex(monitor)
@@ -401,7 +414,8 @@ PluginComponent {
                         sceneId: newSceneId,
                         screenshotPath: screenshotPath,
                         useScreenshot: useScreenshot,
-                        settings: sceneSettings
+                        settings: sceneSettings,
+                        forceNoAudio: forceNoAudio
                     })
 
                     processes[monitor] = weProc
