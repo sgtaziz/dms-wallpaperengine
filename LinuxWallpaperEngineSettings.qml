@@ -113,7 +113,7 @@ PluginSettings {
         width: parent.width
         options: root.monitors
         currentValue: root.selectedMonitor || "No monitors"
-        enabled: root.monitors.length > 2
+        enabled: root.monitors.length > 1
         compactMode: true
 
         onValueChanged: (value) => {
