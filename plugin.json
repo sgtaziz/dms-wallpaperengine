@@ -2,7 +2,7 @@
     "id": "linuxWallpaperEngine",
     "name": "Linux Wallpaper Engine",
     "description": "Animated wallpaper support using linux-wallpaperengine with Steam Workshop scenes",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "sgtaziz",
     "type": "daemon",
     "capabilities": ["wallpaper", "animation"],

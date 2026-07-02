@@ -529,14 +529,13 @@ DankModal {
 
     function loadSavedValues() {
         if (pluginSettings) {
-            const settings = pluginSettings.getSceneSettings()
-            currentValues = settings.properties || {}
+            currentValues = pluginSettings.getSceneProperties(sceneId) || {}
         }
     }
 
     function saveProperties() {
         if (pluginSettings) {
-            pluginSettings.saveSceneSetting("properties", currentValues)
+            pluginSettings.saveSceneProperties(sceneId, currentValues)
         }
     }
 
