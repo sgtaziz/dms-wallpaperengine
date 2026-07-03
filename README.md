@@ -64,14 +64,17 @@ dms ipc call plugins toggle linuxWallpaperEngine
 
 Scene rotation is exposed by this plugin under the `linuxWallpaperEngine` IPC target:
 ```bash
-dms ipc call linuxWallpaperEngine next [monitor]            # next in playlist (all playlists if no monitor)
-dms ipc call linuxWallpaperEngine prev [monitor]            # previous
-dms ipc call linuxWallpaperEngine random [monitor]          # random scene
-dms ipc call linuxWallpaperEngine set <sceneId> [monitor]   # set a specific scene (default: main monitor; "*" allowed). Arg order is flexible: `set <monitor> <sceneId>` also works.
+dms ipc call linuxWallpaperEngine next                      # advance (all monitors)
+dms ipc call linuxWallpaperEngine prev                      # previous (all monitors)
+dms ipc call linuxWallpaperEngine random                    # random scene (all monitors)
+dms ipc call linuxWallpaperEngine nextMonitor <monitor>     # same as above but targeted monitor
+dms ipc call linuxWallpaperEngine prevMonitor <monitor>     # same as above but targeted monitor
+dms ipc call linuxWallpaperEngine randomMonitor <monitor>   # same as above but targeted monitor
+dms ipc call linuxWallpaperEngine set <sceneId> <monitor>   # set a scene on a monitor ("*" = all monitors without their own)
 dms ipc call linuxWallpaperEngine list                      # show active wallpaper per monitor/group
 ```
 
-The optional `monitor` arg targets one output; if it belongs to a span group or inherits `*`, the right owner is resolved automatically. Omitting it advances every active playlist at once.
+Quickshell's IPC matches argument counts exactly, so there is no optional-argument syntax — the "all monitors" and "one monitor" variants are separate commands. If a `<monitor>` belongs to a span group or inherits `*`, the right owner is resolved automatically.
 
 DMS does not define shortcuts itself. Bind these in your window manager config:
 

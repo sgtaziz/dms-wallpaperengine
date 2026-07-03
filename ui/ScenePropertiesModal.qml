@@ -1,11 +1,11 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import qs.Common
 import qs.Widgets
 import qs.Modals.Common
+import "../js/PropertiesParser.js" as PropertiesParser
 
 DankModal {
     id: root
@@ -17,8 +17,6 @@ DankModal {
 
     signal propertiesSaved(var properties)
 
-    // DankMaterialShell uses modalWidth/modalHeight for the actual window size.
-    // Keep width/height in sync for any content that relies on them.
     modalWidth: Math.min(screenWidth - 100, 700)
     modalHeight: Math.min(screenHeight - 100, 600)
     width: modalWidth
@@ -277,7 +275,7 @@ DankModal {
                            (propertyData.value !== undefined ? propertyData.value : minimum)
 
                     onSliderValueChanged: {
-                        currentValues[propertyData.name] = value
+                        setPropertyValue(propertyData.name, value)
                     }
                 }
 
@@ -323,7 +321,7 @@ DankModal {
                     anchors.verticalCenter: parent.verticalCenter
 
                     Repeater {
-                        model: ["R", "G", "B"]
+                        model: ["R", "G", "B", "A"]
 
                         Row {
                             spacing: 4
@@ -337,7 +335,7 @@ DankModal {
 
                             DankSlider {
                                 id: colorSlider
-                                width: 120
+                                width: 80
                                 minimum: 0
                                 maximum: 255
                                 showValue: false
@@ -350,13 +348,10 @@ DankModal {
                                 }
 
                                 onSliderValueChanged: {
-                                    let colorArray = currentValues[propertyData.name] ||
-                                                    propertyData.value || [0, 0, 0]
-                                    colorArray = [...colorArray]
+                                    var colorArray = (currentValues[propertyData.name] ||
+                                                    propertyData.value || [0, 0, 0, 1]).slice()
                                     colorArray[index] = value / 255
-                                    const newArray = [...colorArray]
-                                    currentValues = Object.assign({}, currentValues)
-                                    currentValues[propertyData.name] = newArray
+                                    setPropertyValue(propertyData.name, colorArray)
                                 }
                             }
 
@@ -378,9 +373,9 @@ DankModal {
                 border.width: 1
                 border.color: Theme.outline
 
-                property var colorValue: currentValues[propertyData.name] || propertyData.value || [0, 0, 0]
+                property var colorValue: currentValues[propertyData.name] || propertyData.value || [0, 0, 0, 1]
 
-                color: Qt.rgba(colorValue[0] || 0, colorValue[1] || 0, colorValue[2] || 0, 1)
+                color: Qt.rgba(colorValue[0] || 0, colorValue[1] || 0, colorValue[2] || 0, colorValue[3] !== undefined ? colorValue[3] : 1)
             }
         }
     }
@@ -403,7 +398,9 @@ DankModal {
                         currentValues[propertyData.name] :
                         (propertyData.value !== undefined ? propertyData.value : false)
 
-                onToggled: checked => currentValues[propertyData.name] = checked
+                onToggled: checked => {
+                    setPropertyValue(propertyData.name, checked)
+                }
             }
         }
     }
@@ -435,7 +432,7 @@ DankModal {
                     compactMode: true
 
                     onValueChanged: (value) => {
-                        currentValues[propertyData.name] = value
+                        setPropertyValue(propertyData.name, value)
                     }
                 }
             }
@@ -446,6 +443,13 @@ DankModal {
         if (sceneId) {
             loadProperties()
         }
+    }
+
+    // reassign (not mutate) so the change signal fires and bindings refresh
+    function setPropertyValue(name, value) {
+        var updated = Object.assign({}, currentValues)
+        updated[name] = value
+        currentValues = updated
     }
 
     function loadProperties() {
@@ -459,72 +463,19 @@ DankModal {
 
         stdout: SplitParser {
             onRead: (data) => {
-                propertiesLoader.propertiesOutput += data
+                propertiesLoader.propertiesOutput += data + "\n"
             }
         }
 
         onExited: (code) => {
             if (code === 0 && propertiesOutput) {
-                parseProperties(propertiesOutput)
+                properties = PropertiesParser.parseProperties(propertiesOutput)
+                loadSavedValues()
             } else {
                 properties = []
             }
             propertiesOutput = ""
         }
-    }
-
-    function parseProperties(output) {
-        const lines = output.trim().split('\n')
-        const parsedProperties = []
-
-        let currentProperty = null
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i]
-
-            if (!line.trim() || line.includes("Running with:") || line.includes("Found user setting")) {
-                continue
-            }
-
-            if (line.match(/^(\w+)\s+-\s+(slider|color|boolean|combo)/)) {
-                if (currentProperty) {
-                    parsedProperties.push(currentProperty)
-                }
-
-                const typeMatch = line.match(/^(\w+)\s+-\s+(slider|color|boolean|combo)/)
-                currentProperty = {
-                    name: typeMatch[1],
-                    type: typeMatch[2] === "boolean" ? "bool" : typeMatch[2],
-                    text: "",
-                    value: null
-                }
-            } else if (currentProperty && line.includes("Text:")) {
-                currentProperty.text = line.trim().replace("Text:", "").trim()
-            } else if (currentProperty && currentProperty.type === "slider") {
-                if (line.includes("Min:")) {
-                    currentProperty.min = parseFloat(line.trim().replace("Min:", "").trim())
-                } else if (line.includes("Max:")) {
-                    currentProperty.max = parseFloat(line.trim().replace("Max:", "").trim())
-                } else if (line.includes("Step:")) {
-                    currentProperty.step = parseFloat(line.trim().replace("Step:", "").trim())
-                } else if (line.includes("Value:")) {
-                    currentProperty.value = parseFloat(line.trim().replace("Value:", "").trim())
-                }
-            } else if (currentProperty && currentProperty.type === "color" && line.includes("Value:")) {
-                const valueStr = line.trim().replace("Value:", "").trim()
-                const values = valueStr.split(',').map(v => parseFloat(v.trim()))
-                currentProperty.value = values
-            } else if (currentProperty && currentProperty.type === "bool" && line.includes("Value:")) {
-                currentProperty.value = parseInt(line.trim().replace("Value:", "").trim()) !== 0
-            }
-        }
-
-        if (currentProperty) {
-            parsedProperties.push(currentProperty)
-        }
-
-        properties = parsedProperties
-        loadSavedValues()
     }
 
     function loadSavedValues() {
@@ -540,11 +491,12 @@ DankModal {
     }
 
     function resetToDefaults() {
-        currentValues = {}
+        var defaults = {}
         for (const prop of properties) {
             if (prop.value !== undefined) {
-                currentValues[prop.name] = prop.value
+                defaults[prop.name] = prop.value
             }
         }
+        currentValues = defaults
     }
 }

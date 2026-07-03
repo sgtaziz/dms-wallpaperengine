@@ -1,7 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
-import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import qs.Common
@@ -19,8 +17,6 @@ DankModal {
 
     signal sceneSelected(string sceneId)
 
-    // DankMaterialShell uses modalWidth/modalHeight for the actual window size.
-    // Keep width/height in sync for any content that relies on them.
     modalWidth: Math.min(screenWidth - 100, 1200)
     modalHeight: Math.min(screenHeight - 100, 800)
     width: modalWidth
@@ -128,7 +124,6 @@ DankModal {
                         clip: true
                         model: filteredScenes
 
-                        // choose how many columns you want; this keeps math explicit
                         property int columns: 6
                         cellWidth: width / columns
                         cellHeight: cellWidth + 2 * Theme.spacingS + 2 * Theme.fontSizeSmall + Theme.spacingS
@@ -147,13 +142,6 @@ DankModal {
 
                             property var sceneData: modelData || {}
 
-                            // when this delegate is reused for a different scene
-                            onSceneDataChanged: {
-                                previewImg.extIndex = 0
-                                previewImg.updateSource()
-                            }
-
-                            // the card, centered inside the cell
                             Rectangle {
                                 id: card
                                 width: sceneGrid.cellWidth - Theme.spacingM
@@ -170,87 +158,14 @@ DankModal {
                                     anchors.margins: Theme.spacingS
                                     spacing: Theme.spacingS
 
-                                    Rectangle {
-                                        id: previewFrame
+                                    ScenePreview {
                                         width: parent.width
-                                        height: width            // square preview
-                                        radius: Theme.cornerRadius
-                                        color: "transparent"
-
-                                        Rectangle {
-                                            anchors.fill: parent
-                                            radius: previewFrame.radius
-                                            color: Theme.surface
-                                        }
-
-                                        Rectangle {
-                                            id: wallpaperMask
-                                            anchors.fill: parent
-                                            anchors.margins: 1
-                                            radius: Theme.cornerRadius - 1
-                                            color: "black"
-                                            visible: false
-                                            layer.enabled: true
-                                        }
-
-                                        AnimatedImage {
-                                            id: previewImg
-                                            anchors.fill: parent
-                                            playing: true
-                                            fillMode: Image.PreserveAspectCrop
-                                            cache: true
-                                            asynchronous: true
-
-                                            property var extensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
-                                            property int extIndex: 0
-
-                                            function sceneId() {
-                                                return sceneDelegate.sceneData.sceneId || ""
-                                            }
-
-                                            function updateSource() {
-                                                const sid = sceneId()
-                                                if (!sid || extIndex < 0 || extIndex >= extensions.length) {
-                                                    source = ""
-                                                    return
-                                                }
-                                                source = "file://" + steamWorkshopPath + "/" + sid + "/preview" + extensions[extIndex]
-                                            }
-
-                                            Component.onCompleted: updateSource()
-
-                                            onStatusChanged: {
-                                                if (status === Image.Error) {
-                                                    if (extIndex < extensions.length - 1) {
-                                                        extIndex += 1
-                                                        updateSource()
-                                                    }
-                                                } else if (status === Image.Ready) {
-                                                    const url = source.toString().toLowerCase()
-                                                    const isGif = url.endsWith(".gif")
-                                                    if (isGif) {
-                                                        playing = false
-                                                        currentFrame = 0
-                                                        playing = true
-                                                    } else {
-                                                        playing = false
-                                                    }
-                                                }
-                                            }
-
-                                            StyledText {
-                                                anchors.centerIn: parent
-                                                text: "No Preview"
-                                                opacity: 0.5
-                                                visible: previewImg.status !== Image.Ready
-                                            }
-
-                                            layer.enabled: true
-                                            layer.effect: MultiEffect {
-                                                maskEnabled: true
-                                                maskSource: wallpaperMask
-                                            }
-                                        }
+                                        height: width
+                                        roundedMask: true
+                                        animate: true
+                                        fallbackText: "No Preview"
+                                        sceneId: sceneDelegate.sceneData.sceneId || ""
+                                        steamWorkshopPath: root.steamWorkshopPath
                                     }
 
                                     StyledText {
@@ -322,8 +237,6 @@ DankModal {
         allScenes.clear()
         filteredScenes.clear()
 
-        // Use bash script with jq to map sceneId => name
-        // Falls back to just listing scene IDs if jq is not installed
         sceneScanProcess.command = ["bash", "-c",
             `cd "${steamWorkshopPath}" && for dir in */; do
                 id="\${dir%/}"
@@ -363,7 +276,7 @@ DankModal {
                         const parts = trimmedLine.split('|')
                         if (parts.length >= 2) {
                             const sceneId = parts[0]
-                            const sceneName = parts.slice(1).join('|') // Handle names with | in them
+                            const sceneName = parts.slice(1).join('|')
                             allScenes.append({
                                 sceneId: sceneId,
                                 name: sceneName
@@ -375,11 +288,6 @@ DankModal {
             }
             sceneOutput = ""
         }
-    }
-
-    function readProjectJson(sceneId) {
-        // This function is no longer needed as names are fetched during scan
-        return sceneId
     }
 
     function filterScenes() {
