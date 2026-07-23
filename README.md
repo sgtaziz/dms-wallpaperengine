@@ -1,6 +1,6 @@
 # DMS-WallpaperEngine
 
-A DankMaterialShell plugin for [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine).
+A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin for [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine).
 
 ![dms-wallpaperengine Screenshot](screenshot.png)
 
