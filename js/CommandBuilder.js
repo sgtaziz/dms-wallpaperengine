@@ -42,6 +42,14 @@ function buildCommandArgs(o) {
         args.push(scaling)
     }
 
+    // On niri, anchor to the wlr-layer-shell "background" layer so the wallpaper pairs with the
+    // compositor's place-within-backdrop layer-rule; otherwise niri clones it into every workspace
+    // overview card. Other compositors keep the engine default (bottom).
+    if (o.isNiri) {
+        args.push("--layer")
+        args.push("background")
+    }
+
     var sceneProps = o.settings.properties || {}
     for (var propName in sceneProps) {
         args.push("--set-property")

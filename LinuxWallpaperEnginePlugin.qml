@@ -330,7 +330,8 @@ PluginComponent {
             screenshotPath: screenshotPath,
             useScreenshot: useScreenshot,
             settings: settings,
-            forceNoAudio: forceNoAudio
+            forceNoAudio: forceNoAudio,
+            isNiri: CompositorService.isNiri
         })
 
         processes[key] = weProc
@@ -617,6 +618,7 @@ PluginComponent {
             property bool useScreenshot: false
             property var settings: ({})
             property bool forceNoAudio: false
+            property bool isNiri: false
 
             command: CommandBuilder.buildCommandArgs({
                 screenMode: screenMode,
@@ -625,7 +627,8 @@ PluginComponent {
                 useScreenshot: useScreenshot,
                 screenshotPath: screenshotPath,
                 settings: settings,
-                forceNoAudio: forceNoAudio
+                forceNoAudio: forceNoAudio,
+                isNiri: isNiri
             })
 
             onExited: (code) => {
@@ -725,6 +728,9 @@ PluginComponent {
         prevGenerateStaticWallpaper = generateStaticWallpaper
         ready = true
         console.info("LinuxWallpaperEngine: Plugin starting...")
+        if (CompositorService.isNiri) {
+            console.info("LinuxWallpaperEngine: niri detected, using background layer")
+        }
         magickProbe.command = ["sh", "-c", "command -v magick >/dev/null 2>&1"]
         magickProbe.running = true
         syncScenesWithData()

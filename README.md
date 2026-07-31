@@ -53,6 +53,18 @@ The plugin launches one `linux-wallpaperengine` process with `--screen-span m1,m
 
 Requires a `linux-wallpaperengine` build that includes the `--screen-span` feature (upstream PR #557, merged).
 
+### niri support (`--layer background`)
+niri clones layer-shell surfaces into every workspace card in the overview unless they sit on the `background` layer and match a `place-within-backdrop` layer-rule. The plugin detects niri automatically (via DMS's `CompositorService`) and passes `--layer background`, so you only need to add the rule to your niri config:
+
+```kdl
+layer-rule {
+    match namespace="^linux-wallpaperengine$"
+    place-within-backdrop true
+}
+```
+
+On other compositors no `--layer` flag is sent (the engine default of `bottom` is preserved). Requires a `linux-wallpaperengine` build with the `--layer` flag (upstream PR #585, merged).
+
 ### Power management
 **Pause on Power Saver** / **Pause on Battery** freeze wallpapers when the system is on power-saver or unplugged, rather than killing them. The running processes are suspended in place (`SIGSTOP`), so the last rendered frame stays on screen like a paused video while using no CPU. When the condition clears, they're resumed (`SIGCONT`) — no relaunch or flicker. Any scene/monitor changes made while paused are applied on resume.
 
