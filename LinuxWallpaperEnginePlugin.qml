@@ -715,6 +715,7 @@ PluginComponent {
         repeat: true
         interval: playlistIntervalMinutes * 60 * 1000
         onTriggered: {
+            if (!ready || shouldPauseWallpaper) return
             const owners = collectActiveOwners()
             let bumped = false
             for (const owner of owners) {
