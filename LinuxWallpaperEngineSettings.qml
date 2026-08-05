@@ -73,6 +73,12 @@ PluginSettings {
     property string steamWorkshopPath: steamPaths[0]
     property int currentPathIndex: 0
 
+    // reactive (settingsVersion bumped on store change); absolute since expandPath runs at write time
+    readonly property string resolvedBackgroundsDir: {
+        settingsVersion
+        return loadValue("backgroundsDir", "")
+    }
+
     Component.onCompleted: {
         discoverSteamPath()
     }
@@ -334,6 +340,7 @@ PluginSettings {
                 fallbackText: "No scene selected"
                 sceneId: outputCard.currentScene()
                 steamWorkshopPath: root.steamWorkshopPath
+                backgroundsDir: root.resolvedBackgroundsDir
             }
         }
 
@@ -441,6 +448,7 @@ PluginSettings {
                 delegate: RotationItem {
                     cardOwner: outputCard.cardOwner
                     steamWorkshopPath: root.steamWorkshopPath
+                    backgroundsDir: root.resolvedBackgroundsDir
                     onRemoveRequested: (idx) => {
                         if (outputCard.cardOwner.indexOf("span:") === 0) {
                             root.removeFromSpanGroupPlaylist(outputCard.cardOwner.slice(5), idx)
@@ -838,6 +846,107 @@ PluginSettings {
     }
 
     StyledText {
+        text: "Custom Paths"
+        font.pixelSize: Theme.fontSizeMedium
+        font.weight: Font.Medium
+        width: parent.width
+    }
+
+    Column {
+        width: parent.width
+        spacing: 2
+
+        Row {
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Assets Folder"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankTextField {
+                id: assetsDirField
+                width: parent.width - 180 - Theme.spacingM - assetsDirApplyButton.width - Theme.spacingM
+                placeholderText: "Auto (engine default)"
+                text: {
+                    root.settingsVersion
+                    return root.loadValue("assetsDir", "")
+                }
+            }
+
+            DankButton {
+                id: assetsDirApplyButton
+                text: "Apply"
+                enabled: {
+                    root.settingsVersion
+                    return assetsDirField.text.trim() !== root.loadValue("assetsDir", "")
+                }
+                onClicked: root.saveValue("assetsDir", root.expandPath(assetsDirField.text.trim()))
+            }
+        }
+        StyledText {
+            text: "Path to the WallpaperEngine assets folder, passed as --assets-dir. Leave empty for auto-discovery"
+            font.pixelSize: Theme.fontSizeSmall * 0.9
+            opacity: 0.5
+            width: parent.width
+            wrapMode: Text.Wrap
+        }
+    }
+
+    Column {
+        width: parent.width
+        spacing: 2
+
+        Row {
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Backgrounds Folder"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankTextField {
+                id: backgroundsDirField
+                width: parent.width - 180 - Theme.spacingM - backgroundsDirApplyButton.width - Theme.spacingM
+                placeholderText: "e.g. ~/backgrounds"
+                text: {
+                    root.settingsVersion
+                    return root.loadValue("backgroundsDir", "")
+                }
+            }
+
+            DankButton {
+                id: backgroundsDirApplyButton
+                text: "Apply"
+                enabled: {
+                    root.settingsVersion
+                    return backgroundsDirField.text.trim() !== root.loadValue("backgroundsDir", "")
+                }
+                onClicked: root.saveValue("backgroundsDir", root.expandPath(backgroundsDirField.text.trim()))
+            }
+        }
+        StyledText {
+            text: "Folder of local wallpaper scenes to list in Browse and launch by full path (sidesteps Steam Workshop discovery)"
+            font.pixelSize: Theme.fontSizeSmall * 0.9
+            opacity: 0.5
+            width: parent.width
+            wrapMode: Text.Wrap
+        }
+    }
+
+    Rectangle {
+        width: parent.width
+        height: 1
+        color: Theme.outlineStrong
+    }
+
+    StyledText {
         text: "About"
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
@@ -864,6 +973,7 @@ PluginSettings {
     }
 
     function setScene(sceneId) {
+        sceneId = expandPath(sceneId)
         var monitorScenes = loadValue("monitorScenes", {})
         monitorScenes[selectedMonitor] = sceneId
         saveValue("monitorScenes", monitorScenes)
@@ -884,6 +994,7 @@ PluginSettings {
     }
 
     function addToPlaylist(sceneId) {
+        sceneId = expandPath(sceneId)
         var playlists = loadValue("monitorPlaylists", {})
         if (!playlists[selectedMonitor]) {
             playlists[selectedMonitor] = []
@@ -1019,6 +1130,7 @@ PluginSettings {
     }
 
     function setSpanGroupScene(groupId, sceneId) {
+        sceneId = expandPath(sceneId)
         var groups = getSpanGroups()
         for (var i = 0; i < groups.length; i++) {
             if (groups[i].id === groupId) {
@@ -1037,6 +1149,7 @@ PluginSettings {
     }
 
     function addToSpanGroupPlaylist(groupId, sceneId) {
+        sceneId = expandPath(sceneId)
         var groups = getSpanGroups()
         for (var i = 0; i < groups.length; i++) {
             if (groups[i].id === groupId) {
@@ -1117,6 +1230,17 @@ PluginSettings {
         saveValue("outputSettings", all)
     }
 
+    // expand a leading ~ to the user's home directory; other paths returned unchanged
+    function expandPath(p) {
+        if (!p) return ""
+        if (p.charAt(0) === "~") {
+            var home = StandardPaths.writableLocation(StandardPaths.HomeLocation).toString()
+            if (home.indexOf("file://") === 0) home = home.substring(7)
+            return home + p.substring(1)
+        }
+        return p
+    }
+
     function getSceneProperties(sceneId) {
         if (!sceneId) return {}
         var allSettings = loadValue("sceneSettings", {})
@@ -1142,6 +1266,7 @@ PluginSettings {
         SceneBrowserModal {
             id: sceneBrowser
             steamWorkshopPath: root.steamWorkshopPath
+            customBackgroundsPath: root.resolvedBackgroundsDir
 
             onSceneSelected: (sceneId) => {
                 if (root.spanBrowserGroupId !== "") {
@@ -1157,6 +1282,7 @@ PluginSettings {
         ScenePropertiesModal {
             id: propertiesModal
             pluginSettings: root
+            backgroundsDir: root.resolvedBackgroundsDir
         }
     }
 }

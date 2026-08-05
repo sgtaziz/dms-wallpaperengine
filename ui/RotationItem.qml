@@ -9,6 +9,7 @@ StyledRect {
     required property int index
     property string cardOwner: ""
     property string steamWorkshopPath: ""
+    property string backgroundsDir: ""
 
     signal removeRequested(int index)
     signal propertiesRequested(string sceneId)
@@ -32,6 +33,7 @@ StyledRect {
             fallbackText: ""
             sceneId: root.modelData
             steamWorkshopPath: root.steamWorkshopPath
+            backgroundsDir: root.backgroundsDir
             anchors.verticalCenter: parent.verticalCenter
         }
 

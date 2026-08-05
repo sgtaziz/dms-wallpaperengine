@@ -2,12 +2,14 @@ import QtQuick
 import QtQuick.Effects
 import qs.Common
 import qs.Widgets
+import "../js/Utils.js" as Utils
 
 Rectangle {
     id: root
 
     property string sceneId: ""
     property string steamWorkshopPath: ""
+    property string backgroundsDir: ""
     property bool animate: true
     property bool roundedMask: false
     property string fallbackText: "No Preview"
@@ -57,7 +59,8 @@ Rectangle {
                 source = ""
                 return
             }
-            source = "file://" + root.steamWorkshopPath + "/" + root.sceneId + "/preview" + extensions[extIndex]
+            var folder = Utils.sceneFolderPath(root.sceneId, root.backgroundsDir, root.steamWorkshopPath)
+            source = "file://" + folder + "/preview" + extensions[extIndex]
         }
 
         Component.onCompleted: updateSource()

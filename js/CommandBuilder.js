@@ -1,6 +1,11 @@
 function buildCommandArgs(o) {
     var args = ["linux-wallpaperengine"]
 
+    if (o.assetsDir) {
+        args.push("--assets-dir")
+        args.push(o.assetsDir)
+    }
+
     if (o.screenMode === "span") {
         args.push("--screen-span")
     } else {
@@ -19,7 +24,13 @@ function buildCommandArgs(o) {
     }
 
     args.push("--bg")
-    args.push(o.sceneId)
+    // Authoritative custom root: when backgroundsDir is set, plain ids resolve against it (a path
+    // the engine loads directly), bypassing Steam workshop discovery. Absolute paths pass through.
+    var bgArg = o.sceneId
+    if (bgArg && bgArg.indexOf("/") === -1 && o.backgroundsDir) {
+        bgArg = o.backgroundsDir + "/" + bgArg
+    }
+    args.push(bgArg)
 
     if (o.forceNoAudio || o.settings.silent !== false) {
         args.push("--silent")

@@ -23,6 +23,8 @@ PluginComponent {
     property bool prevGenerateStaticWallpaper: false
     property bool pauseOnPowerSaver: pluginData.pauseOnPowerSaver || false
     property bool pauseOnBattery: pluginData.pauseOnBattery || false
+    property string assetsDir: pluginData.assetsDir || ""
+    property string backgroundsDir: pluginData.backgroundsDir || ""
 
     property var processes: ({})
     property var launchSignatures: ({})
@@ -75,6 +77,21 @@ PluginComponent {
             stopAllOutputs()
             syncScenesWithData()
         }
+    }
+
+    // assetsDir is global, not part of per-output settings, so the per-output change detection in
+    // syncScenesWithData won't catch it. Force a relaunch so running processes pick up the new path.
+    onAssetsDirChanged: {
+        if (!ready) return
+        stopAllOutputs()
+        syncScenesWithData()
+    }
+
+    // Same reasoning: backgroundsDir changes how scene ids resolve to --bg, so relaunch everything.
+    onBackgroundsDirChanged: {
+        if (!ready) return
+        stopAllOutputs()
+        syncScenesWithData()
     }
 
     function getSceneSettings(sceneId) {
@@ -331,7 +348,9 @@ PluginComponent {
             useScreenshot: useScreenshot,
             settings: settings,
             forceNoAudio: forceNoAudio,
-            isNiri: CompositorService.isNiri
+            isNiri: CompositorService.isNiri,
+            assetsDir: root.assetsDir,
+            backgroundsDir: root.backgroundsDir
         })
 
         processes[key] = weProc
@@ -619,6 +638,8 @@ PluginComponent {
             property var settings: ({})
             property bool forceNoAudio: false
             property bool isNiri: false
+            property string assetsDir: ""
+            property string backgroundsDir: ""
 
             command: CommandBuilder.buildCommandArgs({
                 screenMode: screenMode,
@@ -628,7 +649,9 @@ PluginComponent {
                 screenshotPath: screenshotPath,
                 settings: settings,
                 forceNoAudio: forceNoAudio,
-                isNiri: isNiri
+                isNiri: isNiri,
+                assetsDir: assetsDir,
+                backgroundsDir: backgroundsDir
             })
 
             onExited: (code) => {

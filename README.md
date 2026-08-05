@@ -65,6 +65,12 @@ layer-rule {
 
 On other compositors no `--layer` flag is sent (the engine default of `bottom` is preserved). Requires a `linux-wallpaperengine` build with the `--layer` flag (upstream PR #585, merged).
 
+### Custom assets path (`--assets-dir`)
+By default linux-wallpaperengine auto-discovers the WallpaperEngine `assets` folder (shared textures/shaders). If your install lives elsewhere (non-standard Steam path, manual build), set **Assets Folder** under Custom Paths to point at it; the plugin passes it through as `--assets-dir`. Leave it empty for auto-discovery.
+
+### Custom backgrounds folder
+linux-wallpaperengine resolves a scene by workshop id only from the standard Steam workshop dirs. To use scenes stored elsewhere, set **Backgrounds Folder** under Custom Paths to a directory of scene folders (e.g. `~/backgrounds`). When set, it becomes the authoritative source: Browse lists scenes from it, and every scene id is resolved against it and passed to `--bg` as a path (`<folder>/<id>`), so Steam Workshop discovery is bypassed entirely. Clear the folder to go back to Steam Workshop ids. An invalid folder (or one missing a configured scene) makes that scene fail to load, as expected. Manually-entered ids follow the same resolution; absolute paths are always used as-is.
+
 ### Power management
 **Pause on Power Saver** / **Pause on Battery** freeze wallpapers when the system is on power-saver or unplugged, rather than killing them. The running processes are suspended in place (`SIGSTOP`), so the last rendered frame stays on screen like a paused video while using no CPU. When the condition clears, they're resumed (`SIGCONT`) — no relaunch or flicker. Any scene/monitor changes made while paused are applied on resume.
 

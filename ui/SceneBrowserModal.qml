@@ -10,6 +10,7 @@ DankModal {
     id: root
 
     property string steamWorkshopPath: ""
+    property string customBackgroundsPath: ""
     property var sceneList: []
     property string selectedSceneId: ""
     property string searchText: ""
@@ -51,7 +52,7 @@ DankModal {
                 }
 
                 StyledText {
-                    text: "Select Workshop Scene" + (addToPlaylistMode ? " to Add to Playlist" : "")
+                    text: "Select Scene" + (addToPlaylistMode ? " to Add to Playlist" : "")
                     font.pixelSize: Theme.fontSizeLarge
                     font.weight: Font.Bold
                     anchors.verticalCenter: parent.verticalCenter
@@ -166,6 +167,7 @@ DankModal {
                                         fallbackText: "No Preview"
                                         sceneId: sceneDelegate.sceneData.sceneId || ""
                                         steamWorkshopPath: root.steamWorkshopPath
+                                        backgroundsDir: root.customBackgroundsPath
                                     }
 
                                     StyledText {
@@ -205,7 +207,7 @@ DankModal {
 
                     StyledText {
                         anchors.centerIn: parent
-                        text: root.searchText ? "No scenes match your search" : "No scenes found. Make sure Steam Workshop path is correct."
+                        text: root.searchText ? "No scenes match your search" : "No scenes found. Check the Steam Workshop path or Custom Backgrounds folder."
                         opacity: 0.7
                         visible: filteredScenes.count === 0
                         wrapMode: Text.Wrap
@@ -230,30 +232,30 @@ DankModal {
     }
 
     function scanScenes() {
-        if (!steamWorkshopPath) {
+        // Authoritative custom root: when a backgrounds folder is set it replaces Steam Workshop as
+        // the scene source, so browse from it; otherwise browse the Steam workshop dir. Scenes are
+        // stored as ids (folder names) and resolved against the folder at launch.
+        var source = customBackgroundsPath || steamWorkshopPath
+        if (!source) {
             return
         }
 
         allScenes.clear()
         filteredScenes.clear()
 
-        sceneScanProcess.command = ["bash", "-c",
-            `cd "${steamWorkshopPath}" && for dir in */; do
-                id="\${dir%/}"
-                if [[ "$id" =~ ^[0-9]+$ ]]; then
-                    if command -v jq >/dev/null 2>&1 && [[ -f "$id/project.json" ]]; then
-                        title=$(jq -r '.title // empty' "$id/project.json" 2>/dev/null)
-                        if [[ -n "$title" ]]; then
-                            echo "$id|$title"
-                        else
-                            echo "$id|$id"
-                        fi
-                    else
-                        echo "$id|$id"
-                    fi
-                fi
-            done`
-        ]
+        var script =
+            'src="$1"; ' +
+            'if [[ -n "$src" && -d "$src" ]] && cd "$src" 2>/dev/null; then ' +
+                'for dir in */; do ' +
+                    'id="${dir%/}"; ' +
+                    '[[ -f "$id/project.json" ]] || continue; ' +
+                    'title=$(jq -r \'.title // empty\' "$id/project.json" 2>/dev/null); ' +
+                    '[[ -n "$title" ]] || title="$id"; ' +
+                    'echo "$id|$title"; ' +
+                'done; ' +
+            'fi'
+
+        sceneScanProcess.command = ["bash", "-c", script, "bash", source]
         sceneScanProcess.running = true
     }
 

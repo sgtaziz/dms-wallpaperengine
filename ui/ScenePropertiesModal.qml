@@ -6,11 +6,13 @@ import qs.Common
 import qs.Widgets
 import qs.Modals.Common
 import "../js/PropertiesParser.js" as PropertiesParser
+import "../js/Utils.js" as Utils
 
 DankModal {
     id: root
 
     property string sceneId: ""
+    property string backgroundsDir: ""
     property var properties: []
     property var currentValues: ({})
     property var pluginSettings: null
@@ -453,7 +455,7 @@ DankModal {
     }
 
     function loadProperties() {
-        propertiesLoader.command = ["linux-wallpaperengine", sceneId, "--list-properties"]
+        propertiesLoader.command = ["linux-wallpaperengine", Utils.resolveBgArg(sceneId, backgroundsDir), "--list-properties"]
         propertiesLoader.running = true
     }
 
