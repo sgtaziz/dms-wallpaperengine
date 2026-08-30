@@ -542,6 +542,7 @@ PluginSettings {
 
                     onToggled: {
                         saveValue("playlistShuffle", checked)
+                        syncActiveNamedPlaylistSettings(undefined, checked)
                     }
                 }
             }
@@ -560,6 +561,7 @@ PluginSettings {
             repeat: false
             onTriggered: {
                 saveValue("playlistIntervalMinutes", Math.round(intervalSlider.value))
+                syncActiveNamedPlaylistSettings(Math.round(intervalSlider.value), undefined)
             }
         }
 
@@ -1001,6 +1003,7 @@ PluginSettings {
         }
         playlists[selectedMonitor].push(sceneId)
         saveValue("monitorPlaylists", playlists)
+        syncActiveNamedPlaylist(selectedMonitor, playlists[selectedMonitor])
         playlistVersion++
     }
 
@@ -1015,6 +1018,7 @@ PluginSettings {
             playlists[selectedMonitor] = list
         }
         saveValue("monitorPlaylists", playlists)
+        syncActiveNamedPlaylist(selectedMonitor, playlists[selectedMonitor] || [])
         playlistVersion++
     }
 
@@ -1022,10 +1026,32 @@ PluginSettings {
         var playlists = loadValue("monitorPlaylists", {})
         delete playlists[selectedMonitor]
         saveValue("monitorPlaylists", playlists)
+        syncActiveNamedPlaylist(selectedMonitor, [])
         playlistVersion++
         var currentMonitor = selectedMonitor
         selectedMonitor = ""
         selectedMonitor = currentMonitor
+    }
+
+    function syncActiveNamedPlaylist(owner, list) {
+        var activeNames = loadValue("activePlaylistNames", {})
+        var name = activeNames[owner]
+        if (!name) return
+        var named = loadValue("namedPlaylists", {})
+        named[name] = Array.isArray(list) ? list.slice() : []
+        saveValue("namedPlaylists", named)
+    }
+
+    function syncActiveNamedPlaylistSettings(intervalMinutes, shuffle) {
+        var activeNames = loadValue("activePlaylistNames", {})
+        var name = activeNames[selectedMonitor] || activeNames[allMonitorsValue]
+        if (!name) return
+        var allSettings = loadValue("namedPlaylistSettings", {})
+        var settings = allSettings[name] || {}
+        if (intervalMinutes !== undefined) settings.intervalMinutes = intervalMinutes
+        if (shuffle !== undefined) settings.shuffle = shuffle
+        allSettings[name] = settings
+        saveValue("namedPlaylistSettings", allSettings)
     }
 
     function browseScenes() {

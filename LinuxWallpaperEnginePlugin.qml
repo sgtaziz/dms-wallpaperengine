@@ -6,6 +6,7 @@ import Quickshell.Services.UPower
 import qs.Common
 import qs.Services
 import qs.Modules.Plugins
+import "ui"
 import "js/Utils.js" as Utils
 import "js/CommandBuilder.js" as CommandBuilder
 
@@ -14,6 +15,10 @@ PluginComponent {
 
     property var monitorScenes: pluginData.monitorScenes || {}
     property var monitorPlaylists: pluginData.monitorPlaylists || {}
+    property var namedPlaylists: pluginData.namedPlaylists || ({})
+    property var namedPlaylistSettings: pluginData.namedPlaylistSettings || ({})
+    property var activePlaylistNames: pluginData.activePlaylistNames || ({})
+    property var pickerScrollPositions: pluginData.pickerScrollPositions || ({})
     property var spanGroups: pluginData.spanGroups || []
     property var outputSettings: pluginData.outputSettings || {}
     property string activeType: pluginData.activeType || "scene"
@@ -25,6 +30,8 @@ PluginComponent {
     property bool pauseOnBattery: pluginData.pauseOnBattery || false
     property string assetsDir: pluginData.assetsDir || ""
     property string backgroundsDir: pluginData.backgroundsDir || ""
+    property string pickerTargetMonitor: "*"
+    property bool pickerOpen: false
 
     property var processes: ({})
     property var launchSignatures: ({})
@@ -34,6 +41,22 @@ PluginComponent {
     property bool ready: false
     property bool haveMagick: false
     property bool paused: false
+
+    property var steamPaths: {
+        var homePath = StandardPaths.writableLocation(StandardPaths.HomeLocation).toString()
+        if (homePath.startsWith("file://")) {
+            homePath = homePath.substring(7)
+        }
+
+        return [
+            homePath + "/.local/share/Steam/steamapps/workshop/content/431960",
+            homePath + "/.steam/steam/steamapps/workshop/content/431960",
+            homePath + "/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960",
+            homePath + "/.snap/steam/common/.local/share/Steam/steamapps/workshop/content/431960"
+        ]
+    }
+    property string steamWorkshopPath: steamPaths[0]
+    property int currentPathIndex: 0
 
     readonly property bool shouldPauseWallpaper: {
         if (pauseOnPowerSaver && typeof PowerProfiles !== "undefined" && PowerProfiles.profile === PowerProfile.PowerSaver) return true
@@ -59,6 +82,13 @@ PluginComponent {
     Timer {
         id: syncDebounce
         interval: 50
+        repeat: false
+        onTriggered: syncScenesWithData()
+    }
+
+    Timer {
+        id: processRestartTimer
+        interval: 2000
         repeat: false
         onTriggered: syncScenesWithData()
     }
@@ -246,6 +276,214 @@ PluginComponent {
         return monitor
     }
 
+    function discoverSteamPath() {
+        currentPathIndex = 0
+        checkNextPath()
+    }
+
+    function checkNextPath() {
+        if (currentPathIndex >= steamPaths.length) {
+            return
+        }
+
+        const testPath = steamPaths[currentPathIndex]
+        pathCheckProcess.testPath = testPath
+        pathCheckProcess.command = ["test", "-d", testPath]
+        pathCheckProcess.running = true
+    }
+
+    function setSceneForOwner(sceneId, owner) {
+        if (!sceneId || !pluginService || !pluginService.savePluginData) return false
+        const scenes = Object.assign({}, pluginData.monitorScenes || {})
+        const target = owner || "*"
+        scenes[target] = sceneId
+        if (target === "*") {
+            for (const monitor of connectedMonitors()) delete scenes[monitor]
+        }
+        monitorScenes = scenes
+        activeType = "scene"
+        console.info("LinuxWallpaperEngine: Applying scene", sceneId, "to", target)
+        pluginService.savePluginData(pluginId, "monitorScenes", scenes)
+        pluginService.savePluginData(pluginId, "activeType", "scene")
+        stopAllOutputs()
+        syncScenesWithData()
+        return true
+    }
+
+    function playlistForOwner(owner) {
+        const playlists = monitorPlaylists || {}
+        const list = playlists[owner || "*"]
+        return Array.isArray(list) ? list : []
+    }
+
+    function ensureNamedPlaylists(owner) {
+        let lists = Object.assign({}, namedPlaylists || pluginData.namedPlaylists || {})
+        if (lists.Default === undefined) {
+            const legacy = playlistForOwner(owner || "*")
+            lists.Default = Object.keys(lists).length === 0 ? legacy.slice() : []
+            namedPlaylists = lists
+            pluginService.savePluginData(pluginId, "namedPlaylists", lists)
+        }
+        return lists
+    }
+
+    function createNamedPlaylist(name) {
+        const clean = String(name || "").trim()
+        if (!clean || !pluginService || !pluginService.savePluginData) return false
+        const lists = Object.assign({}, ensureNamedPlaylists(pickerTargetMonitor))
+        if (lists[clean] !== undefined) return false
+        lists[clean] = []
+        namedPlaylists = lists
+        pluginService.savePluginData(pluginId, "namedPlaylists", lists)
+        const settings = Object.assign({}, namedPlaylistSettings)
+        settings[clean] = { intervalMinutes: playlistIntervalMinutes, shuffle: playlistShuffle }
+        namedPlaylistSettings = settings
+        pluginService.savePluginData(pluginId, "namedPlaylistSettings", settings)
+        wallpaperPicker.namedPlaylists = lists
+        wallpaperPicker.namedPlaylistSettings = settings
+        wallpaperPicker.selectPlaylist(clean)
+        console.info("LinuxWallpaperEngine: Created playlist", clean)
+        return true
+    }
+
+    function deleteNamedPlaylist(name) {
+        const lists = Object.assign({}, ensureNamedPlaylists(pickerTargetMonitor))
+        if (!name || name === "Default" || lists[name] === undefined || Object.keys(lists).length <= 1) return false
+        const ordered = Object.keys(lists).sort((a, b) => a.localeCompare(b))
+        const deletedIndex = ordered.indexOf(name)
+        delete lists[name]
+        const settings = Object.assign({}, namedPlaylistSettings)
+        delete settings[name]
+        const activeNames = Object.assign({}, activePlaylistNames)
+        for (const owner in activeNames) {
+            if (activeNames[owner] === name) delete activeNames[owner]
+        }
+        namedPlaylists = lists
+        namedPlaylistSettings = settings
+        activePlaylistNames = activeNames
+        pluginService.savePluginData(pluginId, "namedPlaylists", lists)
+        pluginService.savePluginData(pluginId, "namedPlaylistSettings", settings)
+        pluginService.savePluginData(pluginId, "activePlaylistNames", activeNames)
+        wallpaperPicker.namedPlaylists = lists
+        wallpaperPicker.namedPlaylistSettings = settings
+        wallpaperPicker.activePlaylistName = activeNames[pickerTargetMonitor] || ""
+        const remaining = ordered.filter(item => item !== name)
+        const nextIndex = Math.max(0, Math.min(remaining.length - 1, deletedIndex - 1))
+        wallpaperPicker.selectPlaylist(remaining[nextIndex] || "Default")
+        return true
+    }
+
+    function addSceneToNamedPlaylist(sceneId, name) {
+        if (!sceneId || !name || !pluginService || !pluginService.savePluginData) return false
+        const lists = Object.assign({}, ensureNamedPlaylists(pickerTargetMonitor))
+        const list = Array.isArray(lists[name]) ? lists[name].slice() : []
+        if (list.indexOf(sceneId) < 0) list.push(sceneId)
+        lists[name] = list
+        namedPlaylists = lists
+        pluginService.savePluginData(pluginId, "namedPlaylists", lists)
+        wallpaperPicker.namedPlaylists = lists
+        wallpaperPicker.playlistSceneIds = list
+        const target = pickerTargetMonitor || "*"
+        if (activePlaylistNames[target] === name) {
+            const monitorLists = Object.assign({}, monitorPlaylists)
+            monitorLists[target] = list.slice()
+            monitorPlaylists = monitorLists
+            pluginService.savePluginData(pluginId, "monitorPlaylists", monitorLists)
+            if (activeType === "playlist") syncScenesWithData()
+        }
+        console.info("LinuxWallpaperEngine: Added scene", sceneId, "to playlist", name)
+        return true
+    }
+
+    function useNamedPlaylistForOwner(name, owner) {
+        const target = owner || "*"
+        const lists = ensureNamedPlaylists(target)
+        const list = Array.isArray(lists[name]) ? lists[name].slice() : []
+        if (!name || list.length === 0 || !pluginService || !pluginService.savePluginData) return false
+        const playlists = Object.assign({}, monitorPlaylists || {})
+        const activeNames = Object.assign({}, activePlaylistNames || {})
+        playlists[target] = list
+        activeNames[target] = name
+        monitorPlaylists = playlists
+        activePlaylistNames = activeNames
+        activeType = "playlist"
+        const settings = namedPlaylistSettings[name] || {}
+        playlistIntervalMinutes = Math.max(0, Number(settings.intervalMinutes !== undefined ? settings.intervalMinutes : 5))
+        playlistShuffle = settings.shuffle === true
+        pluginService.savePluginData(pluginId, "monitorPlaylists", playlists)
+        pluginService.savePluginData(pluginId, "activePlaylistNames", activeNames)
+        pluginService.savePluginData(pluginId, "activeType", "playlist")
+        pluginService.savePluginData(pluginId, "playlistIntervalMinutes", playlistIntervalMinutes)
+        pluginService.savePluginData(pluginId, "playlistShuffle", playlistShuffle)
+        syncScenesWithData()
+        return true
+    }
+
+    function saveNamedPlaylistSettings(name, intervalMinutes, shuffle) {
+        if (!name || !pluginService || !pluginService.savePluginData) return false
+        const allSettings = Object.assign({}, namedPlaylistSettings)
+        allSettings[name] = {
+            intervalMinutes: Math.max(0, Number(intervalMinutes)),
+            shuffle: shuffle === true
+        }
+        namedPlaylistSettings = allSettings
+        pluginService.savePluginData(pluginId, "namedPlaylistSettings", allSettings)
+        wallpaperPicker.namedPlaylistSettings = allSettings
+
+        const target = pickerTargetMonitor || "*"
+        if (activePlaylistNames[target] === name) {
+            playlistIntervalMinutes = allSettings[name].intervalMinutes
+            playlistShuffle = allSettings[name].shuffle
+            pluginService.savePluginData(pluginId, "playlistIntervalMinutes", playlistIntervalMinutes)
+            pluginService.savePluginData(pluginId, "playlistShuffle", playlistShuffle)
+            restartPlaylistTimers()
+        }
+        return true
+    }
+
+    function removeSceneFromNamedPlaylist(sceneId, name) {
+        if (!sceneId || !name || !pluginService || !pluginService.savePluginData) return false
+        const lists = Object.assign({}, ensureNamedPlaylists(pickerTargetMonitor))
+        const list = (Array.isArray(lists[name]) ? lists[name] : []).filter(s => s !== sceneId)
+        lists[name] = list
+        namedPlaylists = lists
+        pluginService.savePluginData(pluginId, "namedPlaylists", lists)
+        wallpaperPicker.namedPlaylists = lists
+        wallpaperPicker.namedPlaylistSettings = namedPlaylistSettings
+        wallpaperPicker.playlistSceneIds = list
+        const target = pickerTargetMonitor || "*"
+        if (activePlaylistNames[target] === name) {
+            const monitorLists = Object.assign({}, monitorPlaylists)
+            monitorLists[target] = list.slice()
+            monitorPlaylists = monitorLists
+            pluginService.savePluginData(pluginId, "monitorPlaylists", monitorLists)
+            if (activeType === "playlist") syncScenesWithData()
+        }
+        return true
+    }
+
+    function openPicker(monitor) {
+        if (pickerOpen) {
+            wallpaperPicker.close()
+            pickerOpen = false
+            return
+        }
+        pickerTargetMonitor = monitor || "*"
+        pickerOpen = true
+        const lists = ensureNamedPlaylists(pickerTargetMonitor)
+        const names = Object.keys(lists).sort()
+        const preferred = activePlaylistNames[pickerTargetMonitor] || names[0] || ""
+        wallpaperPicker.namedPlaylists = lists
+        wallpaperPicker.namedPlaylistSettings = namedPlaylistSettings
+        wallpaperPicker.activePlaylistName = activePlaylistNames[pickerTargetMonitor] || ""
+        wallpaperPicker.scrollPositions = pickerScrollPositions
+        wallpaperPicker.selectedPlaylistName = preferred
+        wallpaperPicker.playlistSceneIds = preferred && Array.isArray(lists[preferred]) ? lists[preferred].slice() : []
+        wallpaperPicker.currentSceneId = ownerStaticScene(pickerTargetMonitor)
+        wallpaperPicker.showLibrary()
+        wallpaperPicker.open()
+    }
+
     function bumpIndex(owner, direction) {
         const playlist = ownerPlaylist(owner)
         if (!playlist) return false
@@ -340,6 +578,7 @@ PluginComponent {
         }
 
         const weProc = weProcessComponent.createObject(root, {
+            outputKey: key,
             screenMode: newSig.mode,
             screenValue: newSig.value,
             wallpaperMonitors: output.monitors,
@@ -587,14 +826,7 @@ PluginComponent {
         if (!monitor) return "ERROR: monitor required"
         const owner = monitor === "*" ? "*" : monitor
 
-        const scenes = Object.assign({}, pluginData.monitorScenes || {})
-        scenes[owner] = sceneId
-        if (pluginService && pluginService.savePluginData) {
-            pluginService.savePluginData(pluginId, "monitorScenes", scenes)
-            pluginService.savePluginData(pluginId, "activeType", "scene")
-        }
-        syncScenesWithData()
-        return "Set " + owner + " to " + sceneId
+        return setSceneForOwner(sceneId, owner) ? ("Set " + owner + " to " + sceneId) : "ERROR: could not save scene"
     }
 
     function ipcList() {
@@ -621,6 +853,13 @@ PluginComponent {
         function randomMonitor(monitor: string): string { return root.ipcAdvance(monitor, 0) }
         function set(sceneId: string, monitor: string): string { return root.ipcSet(sceneId, monitor) }
         function list(): string { return root.ipcList() }
+        function picker(): string { root.openPicker("*"); return "OK" }
+        function pickerMonitor(monitor: string): string { root.openPicker(monitor); return "OK" }
+        function playlistAdd(name: string, sceneId: string): string { return root.addSceneToNamedPlaylist(sceneId, name) ? "OK" : "ERROR" }
+        function playlistCreate(name: string): string { return root.createNamedPlaylist(name) ? "OK" : "ERROR" }
+        function playlistDelete(name: string): string { return root.deleteNamedPlaylist(name) ? "OK" : "ERROR" }
+        function playlistRemove(name: string, sceneId: string): string { return root.removeSceneFromNamedPlaylist(sceneId, name) ? "OK" : "ERROR" }
+        function playlistUse(name: string, monitor: string): string { return root.useNamedPlaylistForOwner(name, monitor) ? "OK" : "ERROR" }
     }
 
     Component {
@@ -629,6 +868,7 @@ PluginComponent {
         Process {
             id: weProc
 
+            property string outputKey: ""
             property string screenMode: "root"
             property string screenValue: ""
             property var wallpaperMonitors: []
@@ -657,6 +897,14 @@ PluginComponent {
             onExited: (code) => {
                 if (code !== 0) {
                     console.warn("LinuxWallpaperEngine: Process exited with code:", code, "for scene", sceneId, "on", screenValue)
+                }
+                if (root.processes[outputKey] === weProc) {
+                    delete root.processes[outputKey]
+                    delete root.launchSignatures[outputKey]
+                    if (root.ready && !root.shouldPauseWallpaper && !useScreenshot) {
+                        processRestartTimer.restart()
+                    }
+                    destroy()
                 }
             }
         }
@@ -755,6 +1003,8 @@ PluginComponent {
         if (CompositorService.isNiri) {
             console.info("LinuxWallpaperEngine: niri detected, using background layer")
         }
+        discoverSteamPath()
+        ensureNamedPlaylists("*")
         magickProbe.command = ["sh", "-c", "command -v magick >/dev/null 2>&1"]
         magickProbe.running = true
         syncScenesWithData()
@@ -763,6 +1013,65 @@ PluginComponent {
     Process {
         id: magickProbe
         onExited: (code) => { haveMagick = (code === 0) }
+    }
+
+    Process {
+        id: pathCheckProcess
+        property string testPath: ""
+
+        onExited: (code) => {
+            if (code === 0) {
+                steamWorkshopPath = testPath
+            } else {
+                currentPathIndex++
+                checkNextPath()
+            }
+        }
+    }
+
+    WallpaperPickerModal {
+        id: wallpaperPicker
+        steamWorkshopPath: root.steamWorkshopPath
+        customBackgroundsPath: root.backgroundsDir
+
+        onDialogClosed: {
+            root.pickerOpen = false
+        }
+
+        onSceneApplied: (sceneId) => {
+            root.pickerOpen = false
+            root.setSceneForOwner(sceneId, root.pickerTargetMonitor || "*")
+        }
+
+        onSceneAddedToPlaylist: (sceneId, playlistName) => {
+            root.addSceneToNamedPlaylist(sceneId, playlistName)
+        }
+
+        onSceneRemovedFromPlaylist: (sceneId, playlistName) => {
+            root.removeSceneFromNamedPlaylist(sceneId, playlistName)
+        }
+
+        onPlaylistCreated: (name) => {
+            root.createNamedPlaylist(name)
+        }
+
+        onPlaylistDeleted: (name) => {
+            root.deleteNamedPlaylist(name)
+        }
+
+        onPlaylistSettingsChanged: (name, intervalMinutes, shuffle) => {
+            root.saveNamedPlaylistSettings(name, intervalMinutes, shuffle)
+        }
+
+        onScrollPositionsSaved: (positions) => {
+            root.pickerScrollPositions = positions
+            root.pluginService.savePluginData(root.pluginId, "pickerScrollPositions", positions)
+        }
+
+        onPlaylistActivated: (name) => {
+            root.pickerOpen = false
+            root.useNamedPlaylistForOwner(name, root.pickerTargetMonitor || "*")
+        }
     }
 
     Component.onDestruction: {
