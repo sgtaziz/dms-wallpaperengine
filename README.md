@@ -36,6 +36,9 @@ So if you have a scene configured and switch to the Span tab, the scene stops re
 
 The **Scene** tab shows a large preview of the current scene. The **Playlist** and **Span** tabs show a table of the rotation's scenes (thumbnail + scene id + Properties + Remove), with Browse and an add-by-ID field below.
 
+### Wallpaper picker and named playlists
+The standalone picker provides a searchable scene grid, named playlists, per-playlist interval and shuffle settings, and persistent scroll positions. Open it through the `picker` IPC command, then double-click a scene to apply it or a non-empty playlist to activate it. The built-in settings page remains available for per-monitor and span configuration.
+
 ### Settings are per-output
 Each monitor, `*`, and span group keeps its own scaling, FPS, volume, silent, screenshot delay, and advanced toggles — a 1440p monitor and a spanned pair showing the same scene can have different scaling or FPS. The one exception is **Configure Scene Properties** (`--set-property`), which stays per-scene since those values are intrinsic to the wallpaper's content.
 
@@ -90,6 +93,13 @@ dms ipc call linuxWallpaperEngine prevMonitor <monitor>     # same as above but 
 dms ipc call linuxWallpaperEngine randomMonitor <monitor>   # same as above but targeted monitor
 dms ipc call linuxWallpaperEngine set <sceneId> <monitor>   # set a scene on a monitor ("*" = all monitors without their own)
 dms ipc call linuxWallpaperEngine list                      # show active wallpaper per monitor/group
+dms ipc call linuxWallpaperEngine picker                    # toggle the standalone picker for all monitors
+dms ipc call linuxWallpaperEngine pickerMonitor <monitor>   # toggle the picker for one monitor
+dms ipc call linuxWallpaperEngine playlistCreate <name>     # create an empty named playlist
+dms ipc call linuxWallpaperEngine playlistDelete <name>     # delete a named playlist (Default is protected)
+dms ipc call linuxWallpaperEngine playlistAdd <name> <id>   # add a scene to a named playlist
+dms ipc call linuxWallpaperEngine playlistRemove <name> <id> # remove a scene from a named playlist
+dms ipc call linuxWallpaperEngine playlistUse <name> <monitor> # activate a named playlist
 ```
 
 Quickshell's IPC matches argument counts exactly, so there is no optional-argument syntax — the "all monitors" and "one monitor" variants are separate commands. If a `<monitor>` belongs to a span group or inherits `*`, the right owner is resolved automatically.
