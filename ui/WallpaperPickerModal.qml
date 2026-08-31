@@ -1,217 +1,80 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 import qs.Common
 import qs.Modals.Common
 import qs.Widgets
+import "../js/Utils.js" as Utils
 
+// Unified wallpaper picker. One implementation serves both hosts:
+//   - the daemon plugin opens it through IPC (picker / pickerMonitor)
+//   - the settings page opens it for scene browse, playlist add and span browse
+//
+// Hosts bind the persisted state (namedPlaylists, namedPlaylistSettings,
+// spanGroups, activePlaylistNames, currentSceneId, scrollPositions) and react
+// to the signals; the picker never writes storage itself. Sections can be
+// hidden for hosts that only need scene selection (showPlaylists/showSpanGroups).
+//
+// The picker always applies to a target owner: "*", a monitor name, or
+// "span:<groupId>". Named playlists used on a target are copied into the
+// target's rotation (monitor playlist or span group playlist).
 DankModal {
     id: root
 
+    property string targetOwner: "*"
+    property string activeType: "scene"
+    property string currentSceneId: ""
     property string steamWorkshopPath: ""
     property string customBackgroundsPath: ""
-    property string currentSceneId: ""
+    property var namedPlaylists: ({})
+    property var namedPlaylistSettings: ({})
+    property var spanGroups: []
+    // currently connected monitor names (host-fed); span groups with no
+    // connected monitor are stale configs (e.g. docked-mode while undocked)
+    // and render as offline in the sidebar
+    property var connectedMonitors: []
+    property var activePlaylistNames: ({})
+    property var scrollPositions: ({})
+    // host-provided accurate "what is rendering now" summary for the sidebar
+    // CURRENT section (receives the target owner, returns a display string);
+    // falls back to currentSceneId when the host does not provide one
+    property var describeTarget: null
+    // section visibility for hosts that only need scene selection
+    property bool showPlaylists: true
+    property bool showSpanGroups: true
+    // hosts can relabel the primary action ("Apply" vs "Add to Playlist")
+    property string applyLabel: "Apply"
+    // hosts without an "all monitors" concept (the settings page has its own
+    // monitor dropdown) can hide the apply-to-all secondary action
+    property bool showApplyToAll: true
+
+    // picker-local view state (never bound from the host)
+    property string viewMode: "library" // "library" | "playlist" | "span"
     property string selectedSceneId: ""
     property string searchText: ""
     property string selectedPlaylistName: ""
-    property string activePlaylistName: ""
-    property var namedPlaylists: ({
-    })
-    property var namedPlaylistSettings: ({
-    })
-    property var scrollPositions: ({
-    })
+    property string selectedSpanGroupId: ""
     property var playlistSceneIds: []
-    property bool playlistView: false
+    property string addTargetKind: "named" // "named" | "span"
+    property string addTargetKey: ""
     property bool scanning: false
     property int selectedIntervalMinutes: 5
     property bool selectedPlaylistShuffle: false
 
+    readonly property bool sidebarVisible: showPlaylists || showSpanGroups
+    readonly property bool targetIsSpan: Utils.ownerIsSpan(targetOwner)
+
     signal sceneApplied(string sceneId)
+    signal sceneAppliedToAll(string sceneId)
     signal sceneAddedToPlaylist(string sceneId, string playlistName)
     signal sceneRemovedFromPlaylist(string sceneId, string playlistName)
     signal playlistCreated(string name)
     signal playlistDeleted(string name)
     signal playlistActivated(string name)
     signal playlistSettingsChanged(string name, int intervalMinutes, bool shuffle)
+    signal spanGroupActivated(string groupId)
+    signal spanSceneAdded(string groupId, string sceneId)
+    signal spanSceneRemoved(string groupId, string sceneId)
     signal scrollPositionsSaved(var positions)
-
-    function showLibrary() {
-        saveCurrentScrollPosition();
-        playlistView = false;
-        selectedSceneId = currentSceneId;
-        filterScenes();
-        if (allScenes.count === 0)
-            scanScenes();
-
-        restoreScrollPosition("library");
-    }
-
-    function playlistNames() {
-        return Object.keys(namedPlaylists || {
-        }).sort((a, b) => {
-            return a.localeCompare(b);
-        });
-    }
-
-    function selectPlaylist(name) {
-        if (!name || !namedPlaylists || namedPlaylists[name] === undefined)
-            return ;
-
-        saveCurrentScrollPosition();
-        selectedPlaylistName = name;
-        playlistSceneIds = Array.isArray(namedPlaylists[name]) ? namedPlaylists[name].slice() : [];
-        loadSelectedPlaylistSettings();
-        playlistView = true;
-        selectedSceneId = "";
-        filterScenes();
-        restoreScrollPosition("playlist:" + name);
-    }
-
-    function loadSelectedPlaylistSettings() {
-        const settings = (namedPlaylistSettings || {
-        })[selectedPlaylistName] || {
-        };
-        selectedIntervalMinutes = Math.max(0, Number(settings.intervalMinutes !== undefined ? settings.intervalMinutes : 5));
-        selectedPlaylistShuffle = settings.shuffle === true;
-    }
-
-    function updateSelectedPlaylistSettings(intervalMinutes, shuffle) {
-        if (!selectedPlaylistName)
-            return ;
-
-        const interval = Math.max(0, Number(intervalMinutes));
-        const random = shuffle === true;
-        if (selectedIntervalMinutes === interval && selectedPlaylistShuffle === random)
-            return ;
-
-        selectedIntervalMinutes = interval;
-        selectedPlaylistShuffle = random;
-        const allSettings = Object.assign({
-        }, namedPlaylistSettings || {
-        });
-        allSettings[selectedPlaylistName] = {
-            "intervalMinutes": interval,
-            "shuffle": random
-        };
-        namedPlaylistSettings = allSettings;
-        playlistSettingsChanged(selectedPlaylistName, interval, random);
-    }
-
-    function setAddTarget(name) {
-        if (!name || namedPlaylists[name] === undefined)
-            return ;
-
-        selectedPlaylistName = name;
-        playlistSceneIds = Array.isArray(namedPlaylists[name]) ? namedPlaylists[name].slice() : [];
-    }
-
-    function currentViewKey() {
-        return playlistView && selectedPlaylistName ? "playlist:" + selectedPlaylistName : "library";
-    }
-
-    function saveCurrentScrollPosition() {
-        if (typeof sceneGrid === "undefined" || !sceneGrid)
-            return ;
-
-        const positions = Object.assign({
-        }, scrollPositions || {
-        });
-        positions[currentViewKey()] = Math.max(0, sceneGrid.contentY);
-        scrollPositions = positions;
-    }
-
-    function restoreScrollPosition(key) {
-        const value = Number((scrollPositions || {
-        })[key] || 0);
-        Qt.callLater(() => {
-            const maxY = Math.max(0, sceneGrid.contentHeight - sceneGrid.height);
-            sceneGrid.contentY = Math.max(0, Math.min(maxY, value));
-        });
-    }
-
-    function createPlaylist() {
-        let index = 1;
-        let name = "";
-        do {
-            name = "Playlist " + index;
-            index++;
-        } while (namedPlaylists[name] !== undefined)
-        if (namedPlaylists[name] !== undefined)
-            return ;
-
-        console.info("WallpaperPicker: Creating playlist", name);
-        const updated = Object.assign({
-        }, namedPlaylists);
-        updated[name] = [];
-        namedPlaylists = updated;
-        selectedPlaylistName = name;
-        playlistSceneIds = [];
-        playlistView = true;
-        selectedSceneId = "";
-        rebuildPlaylistModel();
-        filterScenes();
-        playlistCreated(name);
-    }
-
-    function sceneInPlaylist(sceneId) {
-        return sceneId && Array.isArray(playlistSceneIds) && playlistSceneIds.indexOf(sceneId) >= 0;
-    }
-
-    function applySelected() {
-        if (!selectedSceneId)
-            return ;
-
-        currentSceneId = selectedSceneId;
-        console.info("WallpaperPicker: Applying selected scene", selectedSceneId);
-        sceneApplied(selectedSceneId);
-        close();
-    }
-
-    function rebuildPlaylistModel() {
-        playlistModel.clear();
-        const names = playlistNames();
-        for (const name of names) {
-            const scenes = namedPlaylists[name];
-            playlistModel.append({
-                "playlistName": name,
-                "sceneCount": Array.isArray(scenes) ? scenes.length : 0
-            });
-        }
-    }
-
-    function scanScenes() {
-        const source = customBackgroundsPath || steamWorkshopPath;
-        if (!source || scanning)
-            return ;
-
-        scanning = true;
-        allScenes.clear();
-        filteredScenes.clear();
-        scanProcess.output = "";
-        const script = 'src="$1"; cd "$src" 2>/dev/null || exit 0; for dir in */; do id="${dir%/}"; [[ -f "$id/project.json" ]] || continue; title=$(jq -r \'.title // empty\' "$id/project.json" 2>/dev/null); [[ -n "$title" ]] || title="$id"; printf "%s|%s\\n" "$id" "$title"; done';
-        scanProcess.command = ["bash", "-c", script, "bash", source];
-        scanProcess.running = true;
-    }
-
-    function filterScenes() {
-        filteredScenes.clear();
-        const term = searchText.toLowerCase();
-        const playlist = Array.isArray(playlistSceneIds) ? playlistSceneIds : [];
-        for (let i = 0; i < allScenes.count; ++i) {
-            const scene = allScenes.get(i);
-            if (playlistView && playlist.indexOf(scene.sceneId) < 0)
-                continue;
-
-            if (term && scene.sceneId.toLowerCase().indexOf(term) < 0 && String(scene.name || "").toLowerCase().indexOf(term) < 0)
-                continue;
-
-            filteredScenes.append({
-                "sceneId": scene.sceneId,
-                "name": scene.name
-            });
-        }
-    }
 
     modalWidth: Math.min(screenWidth - 80, 1180)
     modalHeight: Math.min(screenHeight - 80, 780)
@@ -221,23 +84,443 @@ DankModal {
     height: modalHeight
     positioning: "center"
     allowStacking: true
-    onPlaylistSceneIdsChanged: filterScenes()
+
+    onTargetOwnerChanged: refreshTargetState()
+
+    onDialogClosed: {
+        saveCurrentScrollPosition()
+        scrollPositionsSaved(pendingScrollPositions !== null ? pendingScrollPositions : (scrollPositions || {}))
+        pendingScrollPositions = null
+        selectedSceneId = ""
+        searchText = ""
+        if (typeof searchField !== "undefined" && searchField)
+            searchField.text = ""
+    }
+
+    // Every host save reassigns pluginData wholesale, so all data bindings
+    // fire on every mutation regardless of which key changed. The old handler
+    // revalidated selectedPlaylistName unconditionally and, in span views
+    // (where it is ""), hijacked the grid with the first named playlist's
+    // content. revalidateSelection() re-syncs the CURRENT view instead.
     onNamedPlaylistsChanged: {
-        rebuildPlaylistModel();
-        const names = playlistNames();
-        if (selectedPlaylistName && namedPlaylists[selectedPlaylistName] !== undefined) {
-            playlistSceneIds = namedPlaylists[selectedPlaylistName].slice();
-        } else if (names.length > 0) {
-            selectedPlaylistName = names[0];
-            playlistSceneIds = Array.isArray(namedPlaylists[names[0]]) ? namedPlaylists[names[0]].slice() : [];
+        rebuildModels()
+        revalidateSelection()
+    }
+
+    onNamedPlaylistSettingsChanged: loadSelectedViewSettings()
+    onSpanGroupsChanged: {
+        rebuildModels()
+        revalidateSelection()
+    }
+    onActivePlaylistNamesChanged: rebuildModels()
+    onPlaylistSceneIdsChanged: filterScenes()
+
+    // assign playlistSceneIds only when the content actually changed, so
+    // unrelated saves don't refilter the grid (and reset scroll) for nothing
+    function setViewList(list) {
+        const next = Array.isArray(list) ? list.slice() : []
+        const current = Array.isArray(playlistSceneIds) ? playlistSceneIds : []
+        if (Utils.deepEqual(next, current))
+            return
+
+        playlistSceneIds = next
+    }
+
+    // Re-sync the current view with fresh host data without switching views:
+    // span views refresh from the group, playlist views from the named
+    // playlist (falling back if the selection vanished), library just keeps
+    // the add target valid.
+    function revalidateSelection() {
+        if (viewMode === "span") {
+            const group = selectedSpanGroupId !== "" ? spanGroupById(selectedSpanGroupId) : null
+            if (group === null) {
+                showLibrary()
+                return
+            }
+            setViewList(group.playlist)
+            return
+        }
+        if (viewMode === "playlist") {
+            if (selectedPlaylistName && namedPlaylists[selectedPlaylistName] !== undefined) {
+                setViewList(namedPlaylists[selectedPlaylistName])
+                loadSelectedViewSettings()
+                return
+            }
+            const names = playlistNames()
+            if (names.length > 0) {
+                selectedPlaylistName = names[0]
+                setViewList(namedPlaylists[names[0]])
+                loadSelectedViewSettings()
+                return
+            }
+            selectedPlaylistName = ""
+            setViewList([])
+            showLibrary()
+            return
+        }
+        if (addTargetKey === "" || !addTargetValid())
+            pickDefaultAddTarget()
+    }
+
+    function showLibrary() {
+        saveCurrentScrollPosition()
+        viewMode = "library"
+        selectedSceneId = currentSceneId
+        refreshTargetState()
+        filterScenes()
+        if (allScenes.count === 0)
+            scanScenes()
+
+        restoreScrollPosition("library")
+    }
+
+    function selectPlaylist(name) {
+        if (!name || !namedPlaylists || namedPlaylists[name] === undefined)
+            return
+
+        saveCurrentScrollPosition()
+        selectedSpanGroupId = ""
+        selectedPlaylistName = name
+        viewMode = "playlist"
+        playlistSceneIds = Array.isArray(namedPlaylists[name]) ? namedPlaylists[name].slice() : []
+        selectedSceneId = ""
+        loadSelectedViewSettings()
+        filterScenes()
+        restoreScrollPosition("playlist:" + name)
+    }
+
+    function selectSpanGroup(groupId) {
+        if (!groupId || spanGroupById(groupId) === null)
+            return
+
+        saveCurrentScrollPosition()
+        selectedPlaylistName = ""
+        selectedSpanGroupId = groupId
+        viewMode = "span"
+        const group = spanGroupById(groupId)
+        playlistSceneIds = Array.isArray(group.playlist) ? group.playlist.slice() : []
+        selectedSceneId = ""
+        loadSelectedViewSettings()
+        filterScenes()
+        restoreScrollPosition("span:" + groupId)
+    }
+
+    // Resolve which named playlist the interval/shuffle row edits: the viewed
+    // playlist in playlist view, or the playlist bound to the viewed span group.
+    function settingsPlaylistName() {
+        if (viewMode === "playlist")
+            return selectedPlaylistName
+
+        if (viewMode === "span") {
+            const bound = (activePlaylistNames || {})["span:" + selectedSpanGroupId]
+            return bound !== undefined ? bound : ""
+        }
+        return ""
+    }
+
+    function loadSelectedViewSettings() {
+        const name = settingsPlaylistName()
+        const settings = name !== "" ? ((namedPlaylistSettings || {})[name] || {}) : {}
+        selectedIntervalMinutes = Math.max(0, Number(settings.intervalMinutes !== undefined ? settings.intervalMinutes : 5))
+        selectedPlaylistShuffle = settings.shuffle === true
+    }
+
+    function updateSelectedPlaylistSettings(intervalMinutes, shuffle) {
+        const name = settingsPlaylistName()
+        if (name === "")
+            return
+
+        const interval = Math.max(0, Math.round(Number(intervalMinutes)))
+        const random = shuffle === true
+        if (selectedIntervalMinutes === interval && selectedPlaylistShuffle === random)
+            return
+
+        selectedIntervalMinutes = interval
+        selectedPlaylistShuffle = random
+        playlistSettingsChanged(name, interval, random)
+    }
+
+    function playlistNames() {
+        return Object.keys(namedPlaylists || {}).sort(function (a, b) { return a.localeCompare(b) })
+    }
+
+    function spanGroupById(groupId) {
+        const groups = Array.isArray(spanGroups) ? spanGroups : []
+        for (let i = 0; i < groups.length; ++i) {
+            if (groups[i].id === groupId)
+                return groups[i]
+        }
+        return null
+    }
+
+    function spanGroupIsLive(groupId) {
+        const group = spanGroupById(groupId)
+        if (group === null)
+            return false
+
+        const monitors = Array.isArray(group.monitors) ? group.monitors : []
+        const connected = Array.isArray(connectedMonitors) ? connectedMonitors : []
+        for (let i = 0; i < monitors.length; ++i) {
+            if (connected.indexOf(monitors[i]) >= 0)
+                return true
+        }
+        return false
+    }
+
+    function spanGroupLabel(groupId) {
+        const groups = Array.isArray(spanGroups) ? spanGroups : []
+        for (let i = 0; i < groups.length; ++i) {
+            if (groups[i].id === groupId)
+                return "Group " + (i + 1)
+        }
+        return groupId ? groupId : "Group"
+    }
+
+    function targetLabel() {
+        if (targetIsSpan)
+            return "Span \u00b7 " + spanGroupLabel(Utils.spanGroupId(targetOwner))
+
+        return targetOwner === "*" ? "All Monitors" : targetOwner
+    }
+
+    // Keep sidebar badges and the default add target in sync with the target.
+    function refreshTargetState() {
+        rebuildModels()
+        if (viewMode === "span" && spanGroupById(selectedSpanGroupId) === null)
+            showLibrary()
+
+        if (addTargetKey === "" || !addTargetValid())
+            pickDefaultAddTarget()
+    }
+
+    function addTargetValid() {
+        if (addTargetKind === "span")
+            return spanGroupById(addTargetKey) !== null
+
+        return namedPlaylists !== null && namedPlaylists[addTargetKey] !== undefined
+    }
+
+    function pickDefaultAddTarget() {
+        if (showPlaylists) {
+            // prefer the named playlist bound to the target, then any playlist
+            const bound = (activePlaylistNames || {})[targetOwner]
+            if (bound !== undefined && namedPlaylists[bound] !== undefined) {
+                setAddTarget("named", bound)
+                return
+            }
+            const names = playlistNames()
+            if (names.length > 0) {
+                setAddTarget("named", names[0])
+                return
+            }
+        }
+        if (showSpanGroups) {
+            const groups = Array.isArray(spanGroups) ? spanGroups : []
+            if (groups.length > 0) {
+                setAddTarget("span", groups[0].id)
+                return
+            }
+        }
+        addTargetKind = "named"
+        addTargetKey = ""
+    }
+
+    function setAddTarget(kind, key) {
+        if (kind === "span" && spanGroupById(key) === null)
+            return
+
+        if (kind === "named" && (namedPlaylists || {})[key] === undefined)
+            return
+
+        addTargetKind = kind
+        addTargetKey = key
+    }
+
+    function addTargetLabel() {
+        if (addTargetKind === "span")
+            return "Span: " + spanGroupLabel(addTargetKey)
+
+        return addTargetKey
+    }
+
+    function addTargetOptions() {
+        const options = showPlaylists ? playlistNames() : []
+        if (showSpanGroups) {
+            const groups = Array.isArray(spanGroups) ? spanGroups : []
+            for (let i = 0; i < groups.length; ++i)
+                options.push("Span: " + spanGroupLabel(groups[i].id))
+        }
+        return options
+    }
+
+    function addTargetContains(sceneId) {
+        if (!sceneId)
+            return false
+
+        if (addTargetKind === "span") {
+            const group = spanGroupById(addTargetKey)
+            const list = group ? group.playlist : []
+            return Array.isArray(list) && list.indexOf(sceneId) >= 0
+        }
+        const list = (namedPlaylists || {})[addTargetKey]
+        return Array.isArray(list) && list.indexOf(sceneId) >= 0
+    }
+
+    function createPlaylist() {
+        const names = playlistNames()
+        let index = 1
+        let name = ""
+        do {
+            name = "Playlist " + index
+            index++
+        } while (names.indexOf(name) >= 0)
+
+        // optimistically switch to the new view; the host persists through
+        // playlistCreated() and the binding refresh revalidates the selection
+        selectedSpanGroupId = ""
+        selectedPlaylistName = name
+        viewMode = "playlist"
+        playlistSceneIds = []
+        selectedSceneId = ""
+        playlistCreated(name)
+    }
+
+    function applySelected() {
+        if (!selectedSceneId)
+            return
+
+        sceneApplied(selectedSceneId)
+        close()
+    }
+
+    function rebuildModels() {
+        playlistModel.clear()
+        const names = playlistNames()
+        const activeName = (activePlaylistNames || {})[targetOwner] || ""
+        for (const name of names) {
+            const scenes = namedPlaylists[name]
+            playlistModel.append({
+                "playlistName": name,
+                "sceneCount": Array.isArray(scenes) ? scenes.length : 0,
+                "isActive": name === activeName
+            })
+        }
+
+        spanModel.clear()
+        const groups = Array.isArray(spanGroups) ? spanGroups : []
+        const spanActiveType = activeType === "span"
+        for (let i = 0; i < groups.length; ++i) {
+            const g = groups[i]
+            const live = spanGroupIsLive(g.id)
+            spanModel.append({
+                "groupId": g.id,
+                "groupLabel": "Group " + (i + 1),
+                "sceneCount": Array.isArray(g.playlist) ? g.playlist.length : 0,
+                "isLive": live,
+                "isActive": live && (spanActiveType || ((activePlaylistNames || {})["span:" + g.id] !== undefined))
+            })
         }
     }
-    onNamedPlaylistSettingsChanged: loadSelectedPlaylistSettings()
-    onDialogClosed: {
-        saveCurrentScrollPosition();
-        scrollPositionsSaved(scrollPositions);
-        selectedSceneId = "";
-        searchText = "";
+
+    function scanScenes() {
+        const source = customBackgroundsPath || steamWorkshopPath
+        if (!source || scanning)
+            return
+
+        scanning = true
+        allScenes.clear()
+        filteredScenes.clear()
+        scanProcess.output = ""
+        const script = 'src="$1"; cd "$src" 2>/dev/null || exit 0; for dir in */; do id="${dir%/}"; [[ -f "$id/project.json" ]] || continue; title=$(jq -r \'.title // empty\' "$id/project.json" 2>/dev/null); [[ -n "$title" ]] || title="$id"; printf "%s|%s\\n" "$id" "$title"; done'
+        scanProcess.command = ["bash", "-c", script, "bash", source]
+        scanProcess.running = true
+    }
+
+    function currentViewKey() {
+        if (viewMode === "playlist" && selectedPlaylistName)
+            return "playlist:" + selectedPlaylistName
+
+        if (viewMode === "span" && selectedSpanGroupId)
+            return "span:" + selectedSpanGroupId
+
+        return "library"
+    }
+
+    // scrollPositions is a host-fed input the picker never assigns (assigning
+    // would break the host binding); edits accumulate in a working copy that
+    // is emitted on close and re-seeded from the host on next open
+    property var pendingScrollPositions: null
+
+    function scrollStore() {
+        if (pendingScrollPositions === null)
+            pendingScrollPositions = Object.assign({}, scrollPositions || {})
+        return pendingScrollPositions
+    }
+
+    function saveCurrentScrollPosition() {
+        if (typeof sceneGrid === "undefined" || !sceneGrid)
+            return
+
+        const positions = scrollStore()
+        positions[currentViewKey()] = Math.max(0, sceneGrid.contentY)
+    }
+
+    // a 0ms timer lets the grid lay out before clamping, unlike a single
+    // callLater which can run while contentHeight is still stale
+    function restoreScrollPosition(key) {
+        const source = pendingScrollPositions !== null ? pendingScrollPositions : (scrollPositions || {})
+        scrollRestoreTimer.pendingY = Number(source[key] || 0)
+        scrollRestoreTimer.restart()
+    }
+
+    function filterScenes() {
+        // sceneGrid lives inside the lazily-loaded modal content; host entry
+        // points may run before it is instantiated
+        const haveGrid = typeof sceneGrid !== "undefined" && sceneGrid
+        const keepY = haveGrid ? sceneGrid.contentY : 0
+        const keepKey = currentViewKey()
+        filteredScenes.clear()
+        const term = searchText.toLowerCase()
+        const playlist = Array.isArray(playlistSceneIds) ? playlistSceneIds : []
+        for (let i = 0; i < allScenes.count; ++i) {
+            const scene = allScenes.get(i)
+            if (viewMode !== "library" && playlist.indexOf(scene.sceneId) < 0)
+                continue
+
+            if (term && scene.sceneId.toLowerCase().indexOf(term) < 0 && String(scene.name || "").toLowerCase().indexOf(term) < 0)
+                continue
+
+            filteredScenes.append({
+                "sceneId": scene.sceneId,
+                "name": scene.name
+            })
+        }
+        if (haveGrid && keepKey === lastFilterKey && keepY > 0)
+            sceneGrid.contentY = keepY
+
+        lastFilterKey = keepKey
+    }
+
+    property string lastFilterKey: ""
+
+    function intervalValue(label) {
+        return label === "Manual" ? 0 : parseInt(label, 10)
+    }
+
+    function intervalOptions() {
+        const labels = ["Manual", "1 min", "2 min", "5 min", "10 min", "15 min", "30 min", "60 min"]
+        const value = Math.max(0, Math.round(selectedIntervalMinutes))
+        const label = value === 0 ? "Manual" : value + " min"
+        if (labels.indexOf(label) < 0) {
+            labels.push(label)
+            labels.sort(function (a, b) { return intervalValue(a) - intervalValue(b) })
+        }
+        return labels
+    }
+
+    function intervalLabel() {
+        const value = Math.max(0, Math.round(selectedIntervalMinutes))
+        return value === 0 ? "Manual" : value + " min"
     }
 
     ListModel {
@@ -252,36 +535,57 @@ DankModal {
         id: playlistModel
     }
 
+    ListModel {
+        id: spanModel
+    }
+
+    Timer {
+        id: scrollRestoreTimer
+
+        property real pendingY: 0
+
+        interval: 0
+        repeat: false
+        onTriggered: {
+            // the modal content may not be instantiated yet on a pre-open call
+            if (typeof sceneGrid === "undefined" || !sceneGrid)
+                return
+
+            const maxY = Math.max(0, sceneGrid.contentHeight - sceneGrid.height)
+            sceneGrid.contentY = Math.max(0, Math.min(maxY, pendingY))
+        }
+    }
+
     Process {
         id: scanProcess
 
         property string output: ""
 
-        onExited: (code) => {
-            if (code === 0 && output) {
-                const lines = output.trim().split("\n");
-                for (const line of lines) {
-                    const split = line.indexOf("|");
-                    if (split > 0)
-                        allScenes.append({
-                        "sceneId": line.slice(0, split),
-                        "name": line.slice(split + 1)
-                    });
-
-                }
-            }
-            scanning = false;
-            filterScenes();
-            restoreScrollPosition(currentViewKey());
-            output = "";
-        }
-
         stdout: SplitParser {
             onRead: (data) => {
-                return scanProcess.output += data + "\n";
+                scanProcess.output += data + "\n"
             }
         }
 
+        onExited: (code) => {
+            if (code === 0 && output) {
+                const lines = output.trim().split("\n")
+                for (const line of lines) {
+                    const trimmed = line.trim()
+                    const split = trimmed.indexOf("|")
+                    if (trimmed && split > 0) {
+                        allScenes.append({
+                            "sceneId": trimmed.slice(0, split),
+                            "name": trimmed.slice(split + 1)
+                        })
+                    }
+                }
+            }
+            scanning = false
+            filterScenes()
+            restoreScrollPosition(currentViewKey())
+            output = ""
+        }
     }
 
     content: Rectangle {
@@ -306,14 +610,30 @@ DankModal {
                 DankIcon {
                     name: "wallpaper"
                     size: Theme.iconSize
+                    anchors.verticalCenter: parent.verticalCenter
                 }
 
                 StyledText {
                     text: "Wallpaper Engine"
                     font.pixelSize: Theme.fontSizeLarge
                     font.weight: Font.Bold
+                    anchors.verticalCenter: parent.verticalCenter
                 }
 
+                Rectangle {
+                    height: 28
+                    radius: height / 2
+                    color: Theme.surfaceContainerHighest
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.targetLabel() !== ""
+
+                    StyledText {
+                        anchors.centerIn: parent
+                        anchors.margins: Theme.spacingS
+                        text: root.targetLabel()
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+                }
             }
 
             DankButton {
@@ -323,7 +643,6 @@ DankModal {
                 text: "Close"
                 onClicked: root.close()
             }
-
         }
 
         Rectangle {
@@ -332,7 +651,8 @@ DankModal {
             anchors.left: parent.left
             anchors.top: header.bottom
             anchors.bottom: parent.bottom
-            width: 224
+            width: root.sidebarVisible ? 224 : 0
+            visible: root.sidebarVisible
             color: Theme.surfaceContainerLow
 
             Column {
@@ -345,7 +665,7 @@ DankModal {
                     iconName: "grid_view"
                     label: "All Scenes"
                     detail: allScenes.count + ""
-                    active: !root.playlistView
+                    active: root.viewMode === "library"
                     onActivated: root.showLibrary()
                 }
 
@@ -354,13 +674,13 @@ DankModal {
                     text: "PLAYLISTS"
                     font.pixelSize: Theme.fontSizeSmall
                     opacity: 0.55
+                    visible: root.showPlaylists
                 }
 
                 DankButton {
-                    id: createPlaylistButton
-
                     width: parent.width
                     text: "+  New Playlist"
+                    visible: root.showPlaylists
                     onClicked: root.createPlaylist()
                 }
 
@@ -370,22 +690,64 @@ DankModal {
                     delegate: NavItem {
                         required property string playlistName
                         required property int sceneCount
+                        required property bool isActive
 
                         width: parent.width
-                        iconName: playlistName === root.activePlaylistName ? "play_arrow" : "playlist_play"
+                        iconName: isActive ? "play_arrow" : "playlist_play"
                         label: playlistName
                         detail: sceneCount + ""
-                        active: root.playlistView && root.selectedPlaylistName === playlistName
+                        active: root.viewMode === "playlist" && root.selectedPlaylistName === playlistName
                         onActivated: root.selectPlaylist(playlistName)
                         onDoubleActivated: {
-                            const list = root.namedPlaylists[playlistName];
+                            const list = root.namedPlaylists[playlistName]
                             if (Array.isArray(list) && list.length > 0) {
-                                root.playlistActivated(playlistName);
-                                root.close();
+                                root.playlistActivated(playlistName)
+                                root.close()
                             }
                         }
                     }
+                }
 
+                Item {
+                    width: 1
+                    height: Theme.spacingS
+                    visible: root.showSpanGroups
+                }
+
+                StyledText {
+                    width: parent.width
+                    text: "SPAN GROUPS"
+                    font.pixelSize: Theme.fontSizeSmall
+                    opacity: 0.55
+                    visible: root.showSpanGroups
+                }
+
+                Repeater {
+                    model: spanModel
+
+                    delegate: NavItem {
+                        required property string groupId
+                        required property string groupLabel
+                        required property int sceneCount
+                        required property bool isLive
+                        required property bool isActive
+
+                        width: parent.width
+                        iconName: isActive ? "play_arrow" : "monitor"
+                        label: groupLabel
+                        detail: isLive ? sceneCount + "" : "offline"
+                        dimmed: !isLive
+                        active: root.viewMode === "span" && root.selectedSpanGroupId === groupId
+                        onActivated: root.selectSpanGroup(groupId)
+                        onDoubleActivated: {
+                            const group = root.spanGroupById(groupId)
+                            const list = group ? group.playlist : []
+                            if (Array.isArray(list) && list.length > 0) {
+                                root.spanGroupActivated(groupId)
+                                root.close()
+                            }
+                        }
+                    }
                 }
 
                 Item {
@@ -402,22 +764,17 @@ DankModal {
 
                 StyledText {
                     width: parent.width
-                    text: root.currentSceneId || "No active scene"
+                    text: {
+                        if (root.describeTarget !== null)
+                            return root.describeTarget(root.targetOwner)
+
+                        return root.currentSceneId || "No active scene"
+                    }
                     font.pixelSize: Theme.fontSizeSmall
                     opacity: 0.8
                     wrapMode: Text.WrapAnywhere
                 }
-
-                StyledText {
-                    width: parent.width
-                    text: root.activePlaylistName ? "Active playlist: " + root.activePlaylistName : "Scene mode"
-                    font.pixelSize: Theme.fontSizeSmall
-                    opacity: 0.65
-                    elide: Text.ElideRight
-                }
-
             }
-
         }
 
         Item {
@@ -434,11 +791,18 @@ DankModal {
                 anchors.right: refreshButton.left
                 anchors.rightMargin: Theme.spacingM
                 anchors.top: parent.top
-                placeholderText: root.playlistView ? "Search " + root.selectedPlaylistName + "..." : "Search scenes..."
-                text: root.searchText
+                placeholderText: {
+                    if (root.viewMode === "playlist")
+                        return "Search " + root.selectedPlaylistName + "..."
+
+                    if (root.viewMode === "span")
+                        return "Search " + root.spanGroupLabel(root.selectedSpanGroupId) + "..."
+
+                    return "Search scenes..."
+                }
                 onTextChanged: {
-                    root.searchText = text;
-                    root.filterScenes();
+                    root.searchText = text
+                    root.filterScenes()
                 }
             }
 
@@ -459,18 +823,18 @@ DankModal {
                 anchors.top: playlistSettingsRow.visible ? playlistSettingsRow.bottom : searchField.bottom
                 anchors.topMargin: Theme.spacingS
                 text: {
-                    const total = filteredScenes.count;
+                    const total = filteredScenes.count
                     if (root.scanning)
-                        return "Scanning scene library...";
+                        return "Scanning scene library..."
 
                     if (!total)
-                        return "No scenes";
+                        return "No scenes"
 
-                    const row = Math.max(0, Math.floor(sceneGrid.contentY / sceneGrid.cellHeight));
-                    const first = Math.min(total, row * sceneGrid.columns + 1);
-                    const rows = Math.ceil(sceneGrid.height / sceneGrid.cellHeight);
-                    const last = Math.min(total, first + rows * sceneGrid.columns - 1);
-                    return first + "-" + last + " of " + total;
+                    const row = Math.max(0, Math.floor(sceneGrid.contentY / sceneGrid.cellHeight))
+                    const first = Math.min(total, row * sceneGrid.columns + 1)
+                    const rows = Math.ceil(sceneGrid.height / sceneGrid.cellHeight)
+                    const last = Math.min(total, first + rows * sceneGrid.columns - 1)
+                    return first + "-" + last + " of " + total
                 }
                 font.pixelSize: Theme.fontSizeSmall
                 opacity: 0.65
@@ -484,7 +848,9 @@ DankModal {
                 anchors.top: searchField.bottom
                 anchors.topMargin: Theme.spacingS
                 height: visible ? 40 : 0
-                visible: root.playlistView && root.selectedPlaylistName !== ""
+                // span groups without a bound named playlist rotate on the
+                // global defaults; there is nothing per-group to edit yet
+                visible: root.settingsPlaylistName() !== ""
                 spacing: Theme.spacingM
 
                 StyledText {
@@ -494,12 +860,12 @@ DankModal {
 
                 DankDropdown {
                     width: 130
-                    options: ["1 min", "2 min", "5 min", "10 min", "15 min", "30 min", "60 min"]
-                    currentValue: root.selectedIntervalMinutes + " min"
+                    options: root.intervalOptions()
+                    currentValue: root.intervalLabel()
                     compactMode: true
                     transientSurfaceTracker: root.transientSurfaceTracker
                     onValueChanged: (value) => {
-                        return root.updateSelectedPlaylistSettings(parseInt(value), root.selectedPlaylistShuffle);
+                        root.updateSelectedPlaylistSettings(root.intervalValue(value), root.selectedPlaylistShuffle)
                     }
                 }
 
@@ -524,9 +890,7 @@ DankModal {
                         property: "checked"
                         value: root.selectedPlaylistShuffle
                     }
-
                 }
-
             }
 
             Rectangle {
@@ -545,8 +909,17 @@ DankModal {
                 GridView {
                     id: sceneGrid
 
-                    property int columns: Math.max(3, Math.floor(width / 150))
-                    property real wheelVelocity: 0
+                    // imperative on purpose: a plain binding evaluated against the
+                    // pre-layout width inside the lazily created modal content left
+                    // the count stale on some hosts; recompute on every resize
+                    property int columns: 6
+
+                    function recomputeColumns() {
+                        columns = Math.max(3, Math.floor(width / 150))
+                    }
+
+                    onWidthChanged: recomputeColumns()
+                    Component.onCompleted: recomputeColumns()
 
                     anchors.fill: parent
                     anchors.margins: Theme.spacingM
@@ -557,48 +930,17 @@ DankModal {
                     flickDeceleration: 3500
                     maximumFlickVelocity: 9000
                     keyNavigationEnabled: true
-                    cacheBuffer: cellHeight * 2
-                    cellWidth: width / columns
+                    // integer cell sizes: fractional widths force non-integer
+                    // preview textures (MultiEffect per card) and leave visible
+                    // end-of-row gaps on some scale factors
+                    cellWidth: columns > 0 ? Math.floor(width / columns) : Math.floor(width)
                     cellHeight: cellWidth + 54
-
-                    Timer {
-                        id: inertiaTimer
-
-                        interval: 16
-                        repeat: true
-                        onTriggered: {
-                            const maxY = Math.max(0, sceneGrid.contentHeight - sceneGrid.height);
-                            const nextY = Math.max(0, Math.min(maxY, sceneGrid.contentY + sceneGrid.wheelVelocity));
-                            sceneGrid.contentY = nextY;
-                            sceneGrid.wheelVelocity *= 0.88;
-                            if (Math.abs(sceneGrid.wheelVelocity) < 0.35 || (nextY === 0 && sceneGrid.wheelVelocity < 0) || (nextY === maxY && sceneGrid.wheelVelocity > 0)) {
-                                sceneGrid.wheelVelocity = 0;
-                                stop();
-                            }
-                        }
-                    }
-
-                    WheelHandler {
-                        target: null
-                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                        onWheel: (event) => {
-                            if (sceneGrid.contentHeight <= sceneGrid.height)
-                                return ;
-
-                            const pixel = event.pixelDelta.y;
-                            const impulse = pixel !== 0 ? -pixel * 0.45 : -(event.angleDelta.y / 120) * 42;
-                            sceneGrid.wheelVelocity = Math.max(-90, Math.min(90, sceneGrid.wheelVelocity + impulse));
-                            inertiaTimer.start();
-                            event.accepted = true;
-                        }
-                    }
 
                     delegate: Item {
                         id: delegateRoot
 
                         required property var modelData
-                        property var scene: modelData || ({
-                        })
+                        property var scene: modelData || ({})
 
                         width: sceneGrid.cellWidth
                         height: sceneGrid.cellHeight
@@ -642,7 +984,6 @@ DankModal {
                                     opacity: 0.55
                                     elide: Text.ElideRight
                                 }
-
                             }
 
                             MouseArea {
@@ -652,15 +993,12 @@ DankModal {
                                 hoverEnabled: true
                                 onClicked: root.selectedSceneId = delegateRoot.scene.sceneId || ""
                                 onDoubleClicked: {
-                                    root.selectedSceneId = delegateRoot.scene.sceneId || "";
-                                    root.applySelected();
+                                    root.selectedSceneId = delegateRoot.scene.sceneId || ""
+                                    root.applySelected()
                                 }
                             }
-
                         }
-
                     }
-
                 }
 
                 Rectangle {
@@ -690,32 +1028,27 @@ DankModal {
                         id: scrollMouse
 
                         function seek(yPos) {
-                            const maxY = Math.max(0, sceneGrid.contentHeight - sceneGrid.height);
-                            const travel = Math.max(1, height - scrollThumb.height);
-                            sceneGrid.contentY = maxY * Math.max(0, Math.min(1, (yPos - scrollThumb.height / 2) / travel));
+                            const maxY = Math.max(0, sceneGrid.contentHeight - sceneGrid.height)
+                            const travel = Math.max(1, height - scrollThumb.height)
+                            sceneGrid.contentY = maxY * Math.max(0, Math.min(1, (yPos - scrollThumb.height / 2) / travel))
                         }
 
                         anchors.fill: parent
                         hoverEnabled: true
-                        onPressed: (mouse) => {
-                            return seek(mouse.y);
-                        }
+                        onPressed: (mouse) => seek(mouse.y)
                         onPositionChanged: (mouse) => {
                             if (pressed)
-                                seek(mouse.y);
-
+                                seek(mouse.y)
                         }
                     }
-
                 }
 
                 StyledText {
                     anchors.centerIn: parent
                     visible: !root.scanning && filteredScenes.count === 0
-                    text: root.playlistView ? "Playlist is empty" : "No scenes found"
+                    text: root.viewMode === "library" ? "No scenes found" : "Nothing here yet"
                     opacity: 0.6
                 }
-
             }
 
             Item {
@@ -745,61 +1078,89 @@ DankModal {
 
                     DankButton {
                         text: root.selectedPlaylistName ? "Delete " + root.selectedPlaylistName : "Delete Playlist"
-                        visible: root.playlistView
+                        visible: root.viewMode === "playlist" && root.showPlaylists
                         enabled: root.selectedPlaylistName !== "Default" && root.playlistNames().length > 1
                         onClicked: root.playlistDeleted(root.selectedPlaylistName)
                     }
 
                     DankButton {
-                        text: "Use Playlist"
-                        visible: root.playlistView
+                        text: root.viewMode === "span" ? "Use Span Group" : "Use Playlist"
+                        visible: root.viewMode === "playlist" || root.viewMode === "span"
                         enabled: root.playlistSceneIds.length > 0
                         onClicked: {
-                            root.playlistActivated(root.selectedPlaylistName);
-                            root.close();
+                            if (root.viewMode === "span")
+                                root.spanGroupActivated(root.selectedSpanGroupId)
+                            else
+                                root.playlistActivated(root.selectedPlaylistName)
+                            root.close()
                         }
                     }
 
                     DankDropdown {
                         width: 170
-                        visible: !root.playlistView
-                        options: root.playlistNames()
-                        currentValue: root.selectedPlaylistName
+                        visible: root.viewMode === "library" && root.addTargetOptions().length > 0
+                        options: root.addTargetOptions()
+                        currentValue: root.addTargetLabel()
                         compactMode: true
                         openUpwards: true
                         transientSurfaceTracker: root.transientSurfaceTracker
                         onValueChanged: (value) => {
-                            return root.setAddTarget(value);
+                            if (value.indexOf("Span: ") === 0) {
+                                const label = value.slice(6)
+                                const groups = Array.isArray(root.spanGroups) ? root.spanGroups : []
+                                for (let i = 0; i < groups.length; ++i) {
+                                    if (root.spanGroupLabel(groups[i].id) === label) {
+                                        root.setAddTarget("span", groups[i].id)
+                                        return
+                                    }
+                                }
+                            } else {
+                                root.setAddTarget("named", value)
+                            }
                         }
                     }
 
                     DankButton {
-                        id: playlistButton
-
-                        text: root.playlistView ? "Remove" : "Add"
-                        enabled: root.selectedSceneId !== "" && root.selectedPlaylistName !== "" && (root.playlistView || !root.sceneInPlaylist(root.selectedSceneId))
+                        text: root.viewMode === "library" ? "Add" : "Remove"
+                        visible: root.viewMode === "library" ? root.addTargetOptions().length > 0 : true
+                        enabled: {
+                            if (root.selectedSceneId === "")
+                                return false
+                            if (root.viewMode === "library")
+                                return root.addTargetValid() && !root.addTargetContains(root.selectedSceneId)
+                            return true
+                        }
                         onClicked: {
-                            if (root.playlistView)
-                                root.sceneRemovedFromPlaylist(root.selectedSceneId, root.selectedPlaylistName);
-                            else
-                                root.sceneAddedToPlaylist(root.selectedSceneId, root.selectedPlaylistName);
+                            if (root.viewMode === "playlist") {
+                                root.sceneRemovedFromPlaylist(root.selectedSceneId, root.selectedPlaylistName)
+                            } else if (root.viewMode === "span") {
+                                root.spanSceneRemoved(root.selectedSpanGroupId, root.selectedSceneId)
+                            } else if (root.addTargetKind === "span") {
+                                root.spanSceneAdded(root.addTargetKey, root.selectedSceneId)
+                            } else {
+                                root.sceneAddedToPlaylist(root.selectedSceneId, root.addTargetKey)
+                            }
                         }
                     }
 
                     DankButton {
-                        id: applyButton
+                        text: "Apply to All"
+                        visible: root.showApplyToAll
+                        enabled: root.selectedSceneId !== ""
+                        onClicked: {
+                            root.sceneAppliedToAll(root.selectedSceneId)
+                            root.close()
+                        }
+                    }
 
-                        text: "Apply"
+                    DankButton {
+                        text: root.applyLabel
                         enabled: root.selectedSceneId !== ""
                         onClicked: root.applySelected()
                     }
-
                 }
-
             }
-
         }
-
     }
 
     component NavItem: Rectangle {
@@ -809,12 +1170,14 @@ DankModal {
         property string label: ""
         property string detail: ""
         property bool active: false
+        property bool dimmed: false
 
         signal activated()
         signal doubleActivated()
 
         height: 44
         radius: Theme.cornerRadius
+        opacity: dimmed ? 0.45 : 1.0
         color: active ? Theme.primaryContainer : (navMouse.containsMouse ? Theme.surfaceContainerHighest : "transparent")
 
         DankIcon {
@@ -855,7 +1218,5 @@ DankModal {
             onClicked: nav.activated()
             onDoubleClicked: nav.doubleActivated()
         }
-
     }
-
 }

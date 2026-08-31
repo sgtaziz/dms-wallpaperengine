@@ -7,6 +7,7 @@ import qs.Widgets
 import qs.Services
 import qs.Modules.Plugins
 import "ui"
+import "js/Utils.js" as Utils
 
 PluginSettings {
     id: root
@@ -34,7 +35,9 @@ PluginSettings {
         return getCurrentSceneId()
     }
 
-    property string spanBrowserGroupId: ""
+    // browse flows through the unified picker: "set" applies the picked scene,
+    // "add" appends it to the target's rotation (monitor or span group)
+    property bool browseAddMode: false
 
     property bool restoredTab: false
 
@@ -56,20 +59,7 @@ PluginSettings {
         }
     }
 
-    property var steamPaths: {
-        var homePath = StandardPaths.writableLocation(StandardPaths.HomeLocation).toString()
-        if (homePath.startsWith("file://")) {
-            homePath = homePath.substring(7)
-        }
-
-        return [
-            homePath + "/.local/share/Steam/steamapps/workshop/content/431960",
-            homePath + "/.steam/steam/steamapps/workshop/content/431960",
-            homePath + "/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960",
-            homePath + "/.snap/steam/common/.local/share/Steam/steamapps/workshop/content/431960"
-        ]
-    }
-
+    readonly property var steamPaths: Utils.steamWorkshopCandidates(StandardPaths.writableLocation(StandardPaths.HomeLocation).toString())
     property string steamWorkshopPath: steamPaths[0]
     property int currentPathIndex: 0
 
@@ -354,8 +344,7 @@ PluginSettings {
                 text: "Browse Scenes"
                 width: (parent.width - Theme.spacingM * 2) / 3
                 onClicked: {
-                    root.spanBrowserGroupId = ""
-                    root.browseScenes()
+                    root.openSceneBrowse(root.selectedMonitor)
                 }
             }
 
@@ -504,11 +493,9 @@ PluginSettings {
                     text: "Browse"
                     onClicked: {
                         if (outputCard.showMonitorToggles) {
-                            root.openSpanSceneBrowser(root.selectedSpanGroupId, true)
+                            root.openRotationBrowse("span:" + root.selectedSpanGroupId)
                         } else {
-                            root.spanBrowserGroupId = ""
-                            sceneBrowser.addToPlaylistMode = true
-                            sceneBrowser.open()
+                            root.openRotationBrowse(root.selectedMonitor)
                         }
                     }
                 }
@@ -974,12 +961,14 @@ PluginSettings {
         return Array.isArray(list) ? list : []
     }
 
-    function setScene(sceneId) {
+    function setScene(sceneId, owner) {
         sceneId = expandPath(sceneId)
+        var target = owner !== undefined && owner !== "" ? owner : selectedMonitor
         var monitorScenes = loadValue("monitorScenes", {})
-        monitorScenes[selectedMonitor] = sceneId
+        monitorScenes[target] = sceneId
         saveValue("monitorScenes", monitorScenes)
-        sceneIdField.text = sceneId
+        if (target === selectedMonitor)
+            sceneIdField.text = sceneId
         var currentMonitor = selectedMonitor
         selectedMonitor = ""
         selectedMonitor = currentMonitor
@@ -995,15 +984,16 @@ PluginSettings {
         selectedMonitor = currentMonitor
     }
 
-    function addToPlaylist(sceneId) {
+    function addToPlaylist(sceneId, owner) {
         sceneId = expandPath(sceneId)
+        var target = owner !== undefined && owner !== "" ? owner : selectedMonitor
         var playlists = loadValue("monitorPlaylists", {})
-        if (!playlists[selectedMonitor]) {
-            playlists[selectedMonitor] = []
+        if (!playlists[target]) {
+            playlists[target] = []
         }
-        playlists[selectedMonitor].push(sceneId)
+        playlists[target].push(sceneId)
         saveValue("monitorPlaylists", playlists)
-        syncActiveNamedPlaylist(selectedMonitor, playlists[selectedMonitor])
+        syncActiveNamedPlaylist(target, playlists[target])
         playlistVersion++
     }
 
@@ -1044,7 +1034,10 @@ PluginSettings {
 
     function syncActiveNamedPlaylistSettings(intervalMinutes, shuffle) {
         var activeNames = loadValue("activePlaylistNames", {})
-        var name = activeNames[selectedMonitor] || activeNames[allMonitorsValue]
+        // resolve through the tab's actual owner: the span group on the Span
+        // tab, else the selected monitor, else the global default owner
+        var owner = currentTab === 2 ? ("span:" + selectedSpanGroupId) : selectedMonitor
+        var name = activeNames[owner] || activeNames[selectedMonitor] || activeNames[allMonitorsValue]
         if (!name) return
         var allSettings = loadValue("namedPlaylistSettings", {})
         var settings = allSettings[name] || {}
@@ -1054,10 +1047,44 @@ PluginSettings {
         saveValue("namedPlaylistSettings", allSettings)
     }
 
-    function browseScenes() {
-        root.spanBrowserGroupId = ""
-        sceneBrowser.addToPlaylistMode = false
-        sceneBrowser.open()
+    // Unified picker entry points. Both hide the playlist/span sections: the
+    // settings browse flows only ever pick a single scene; named playlists
+    // and span groups are managed through the full picker (daemon IPC).
+    function openSceneBrowse(target) {
+        browseAddMode = false
+        scenePicker.targetOwner = target || selectedMonitor
+        scenePicker.showPlaylists = false
+        scenePicker.showSpanGroups = false
+        scenePicker.applyLabel = "Apply"
+        scenePicker.showLibrary()
+        scenePicker.open()
+    }
+
+    function openRotationBrowse(target) {
+        browseAddMode = true
+        scenePicker.targetOwner = target || selectedMonitor
+        scenePicker.showPlaylists = false
+        scenePicker.showSpanGroups = false
+        scenePicker.applyLabel = "Add"
+        scenePicker.showLibrary()
+        scenePicker.open()
+    }
+
+    function applyBrowseSelection(sceneId) {
+        const target = scenePicker.targetOwner
+        if (browseAddMode) {
+            if (Utils.ownerIsSpan(target)) {
+                addToSpanGroupPlaylist(Utils.spanGroupId(target), sceneId)
+            } else {
+                addToPlaylist(sceneId, target)
+            }
+        } else {
+            if (Utils.ownerIsSpan(target)) {
+                setSpanGroupScene(Utils.spanGroupId(target), sceneId)
+            } else {
+                setScene(sceneId, target)
+            }
+        }
     }
 
     function openSceneProperties(sceneId) {
@@ -1136,6 +1163,17 @@ PluginSettings {
                     monitors.splice(idx, 1)
                 } else {
                     monitors.push(monitorName)
+                    // a monitor can only span with one group at a time: adding
+                    // it here removes it from any other group
+                    for (var j = 0; j < groups.length; j++) {
+                        if (groups[j].id !== groupId && Array.isArray(groups[j].monitors)) {
+                            var other = groups[j].monitors
+                            var k = other.indexOf(monitorName)
+                            if (k >= 0) {
+                                groups[j].monitors = other.slice(0, k).concat(other.slice(k + 1))
+                            }
+                        }
+                    }
                 }
                 groups[i].monitors = monitors
                 break
@@ -1221,23 +1259,6 @@ PluginSettings {
         return []
     }
 
-    function openSpanSceneBrowser(groupId, playlistMode) {
-        root.spanBrowserGroupId = groupId
-        sceneBrowser.addToPlaylistMode = playlistMode
-        sceneBrowser.open()
-    }
-
-    function applySpanBrowserSelection(sceneId) {
-        var groupId = root.spanBrowserGroupId
-        root.spanBrowserGroupId = ""
-        if (groupId === "") return
-        if (sceneBrowser.addToPlaylistMode) {
-            addToSpanGroupPlaylist(groupId, sceneId)
-        } else {
-            setSpanGroupScene(groupId, sceneId)
-        }
-    }
-
     function getOutputSetting(key, defaultValue) {
         // read to make the binding depend on them (store change + active owner)
         settingsVersion
@@ -1289,20 +1310,40 @@ PluginSettings {
         height: 0
         visible: false
 
-        SceneBrowserModal {
-            id: sceneBrowser
+        WallpaperPickerModal {
+            id: scenePicker
+
             steamWorkshopPath: root.steamWorkshopPath
             customBackgroundsPath: root.resolvedBackgroundsDir
+            // the settings page has its own All Monitors selector, so the
+            // picker's apply-to-all action is not needed here
+            showApplyToAll: false
+            spanGroups: root.getSpanGroups()
+            connectedMonitors: root.monitors
 
-            onSceneSelected: (sceneId) => {
-                if (root.spanBrowserGroupId !== "") {
-                    applySpanBrowserSelection(sceneId)
-                } else if (sceneBrowser.addToPlaylistMode) {
-                    addToPlaylist(sceneId)
-                } else {
-                    setScene(sceneId)
-                }
+            // feeds for the (hidden) playlist/span sections; bound for safety
+            // in case a future flow re-enables them here
+            namedPlaylists: {
+                settingsVersion
+                return loadValue("namedPlaylists", {})
             }
+            activePlaylistNames: {
+                settingsVersion
+                return loadValue("activePlaylistNames", {})
+            }
+            activeType: {
+                settingsVersion
+                return loadValue("activeType", "scene")
+            }
+            currentSceneId: {
+                settingsVersion
+                var owner = scenePicker.targetOwner
+                if (Utils.ownerIsSpan(owner))
+                    return root.spanGroupScene(Utils.spanGroupId(owner))
+                return (loadValue("monitorScenes", {})[owner] || "")
+            }
+
+            onSceneApplied: (sceneId) => root.applyBrowseSelection(sceneId)
         }
 
         ScenePropertiesModal {

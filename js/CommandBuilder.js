@@ -53,13 +53,15 @@ function buildCommandArgs(o) {
         args.push(scaling)
     }
 
-    // On niri, anchor to the wlr-layer-shell "background" layer so the wallpaper pairs with the
-    // compositor's place-within-backdrop layer-rule; otherwise niri clones it into every workspace
-    // overview card. Other compositors keep the engine default (bottom).
-    if (o.isNiri) {
-        args.push("--layer")
-        args.push("background")
-    }
+    // Always anchor to the wlr-layer-shell "background" layer. DMS desktop
+    // widgets render on "bottom", and same-layer stacking is map-order, so a
+    // (re)spawned wallpaper left on the engine-default "bottom" would cover
+    // them after every screen/scene change. "background" is strictly below
+    // "bottom" per the protocol, making the order deterministic. On niri it
+    // additionally pairs with place-within-backdrop layer-rules so the
+    // wallpaper isn't cloned into every overview workspace card.
+    args.push("--layer")
+    args.push("background")
 
     var sceneProps = o.settings.properties || {}
     for (var propName in sceneProps) {
