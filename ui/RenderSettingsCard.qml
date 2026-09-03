@@ -8,8 +8,29 @@ Column {
     property var getOutputSetting
     property var saveOutputSetting
     property string settingsSceneId: ""
+    readonly property var hwdecOptions: [
+        "Automatic",
+        "NVIDIA NVDEC (copy-back)",
+        "Software decoding"
+    ]
 
     signal configurePropertiesRequested()
+
+    function hwdecDisplay(value) {
+        switch (value) {
+        case "nvdec-copy": return "NVIDIA NVDEC (copy-back)"
+        case "no": return "Software decoding"
+        default: return "Automatic"
+        }
+    }
+
+    function hwdecValue(label) {
+        switch (label) {
+        case "NVIDIA NVDEC (copy-back)": return "nvdec-copy"
+        case "Software decoding": return "no"
+        default: return "auto"
+        }
+    }
 
     width: parent.width
     spacing: Theme.spacingM
@@ -117,6 +138,48 @@ Column {
         }
         StyledText {
             text: "Frame rate for the animated wallpaper"
+            font.pixelSize: Theme.fontSizeSmall * 0.9
+            opacity: 0.5
+            width: parent.width
+            wrapMode: Text.Wrap
+        }
+    }
+
+    Column {
+        width: parent.width
+        spacing: 2
+
+        Row {
+            id: hwdecRow
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Hardware Decoder"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankDropdown {
+                id: hwdecDropdown
+                width: parent.width - 180 - Theme.spacingM
+                options: root.hwdecOptions
+                compactMode: true
+
+                Binding {
+                    target: hwdecDropdown
+                    property: "currentValue"
+                    value: root.hwdecDisplay(getOutputSetting("hwdec", "auto"))
+                }
+
+                onValueChanged: (value) => {
+                    saveOutputSetting("hwdec", root.hwdecValue(value))
+                }
+            }
+        }
+        StyledText {
+            text: "Select automatic, NVIDIA copy-back, or software video decoding"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width
