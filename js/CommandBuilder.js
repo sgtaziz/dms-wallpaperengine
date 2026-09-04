@@ -47,6 +47,12 @@ function buildCommandArgs(o) {
         args.push(String(fps))
     }
 
+    var hwdec = o.settings.hwdec || "auto"
+    if (hwdec === "nvdec-copy" || hwdec === "no") {
+        args.push("--hwdec")
+        args.push(hwdec)
+    }
+
     var scaling = o.settings.scaling || "default"
     if (scaling !== "default") {
         args.push("--scaling")
