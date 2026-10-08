@@ -44,6 +44,7 @@ PluginComponent {
     property var rotationTimers: ({})
     property var processStartTimes: ({})
     property var crashCounts: ({})
+    property var screenshotTimers: ({})
     property bool ready: false
     property bool haveMagick: false
     property bool paused: false
@@ -649,25 +650,48 @@ PluginComponent {
         processStartTimes[key] = Date.now()
         delete pendingLaunches[key]
 
+        cancelScreenshotTimer(key)
         if (useScreenshot) {
             const captureWaitMs = root.screenshotCaptureWaitMs(settings)
             if (output.kind === "span") {
                 const crop = spanCropTimer.createObject(root, {
+                    outputKey: key,
                     spanPath: screenshotPath,
                     monitors: output.monitors.slice(),
                     sceneId: sceneId,
                     delayMs: captureWaitMs
                 })
+                screenshotTimers[key] = crop
                 crop.running = true
             } else {
                 const setWallpaper = setWallpaperTimer.createObject(root, {
+                    outputKey: key,
+                    sceneId: sceneId,
                     wallpaperMonitors: output.monitors,
                     screenshotPath: screenshotPath,
                     delayMs: captureWaitMs
                 })
+                screenshotTimers[key] = setWallpaper
                 setWallpaper.running = true
             }
         }
+    }
+
+    // The screenshot of a launch is applied on a timer; when the output is
+    // stopped or switched to another scene first, that timer must not fire, or
+    // it sets the wallpaper to the previous scene's screenshot.
+    function cancelScreenshotTimer(key) {
+        const timer = screenshotTimers[key]
+        if (timer) {
+            timer.running = false
+            timer.destroy()
+        }
+        delete screenshotTimers[key]
+    }
+
+    function screenshotStillCurrent(key, sceneId) {
+        const proc = processes[key]
+        return !!proc && proc.sceneId === sceneId
     }
 
     function screenshotDir() {
@@ -706,7 +730,7 @@ PluginComponent {
         return rects
     }
 
-    function applySpanScreenshot(spanPath, monitors, sceneId) {
+    function applySpanScreenshot(outputKey, spanPath, monitors, sceneId) {
         if (!SessionData.perMonitorWallpaper) {
             SessionData.setPerMonitorWallpaper(true)
         }
@@ -723,6 +747,8 @@ PluginComponent {
             Quickshell.execDetached(["magick", spanPath,
                 "-crop", r.w + "x" + r.h + "+" + r.x + "+0", "+repage", r.path])
             const setWallpaper = setWallpaperTimer.createObject(root, {
+                outputKey: outputKey,
+                sceneId: sceneId,
                 wallpaperMonitors: [r.monitor],
                 screenshotPath: r.path,
                 delayMs: 1500
@@ -747,6 +773,7 @@ PluginComponent {
             processes[key].destroy()
             delete processes[key]
         }
+        cancelScreenshotTimer(key)
 
         const oldSig = launchSignatures[key] || null
         if (!oldSig) {
@@ -778,6 +805,7 @@ PluginComponent {
             processes[key].destroy()
             delete processes[key]
         }
+        cancelScreenshotTimer(key)
         delete pendingLaunches[key]
         delete pendingKillers[key]
         delete launchSignatures[key]
@@ -825,6 +853,9 @@ PluginComponent {
             }
         }
         processes = ({})
+        for (const key in screenshotTimers) {
+            cancelScreenshotTimer(key)
+        }
         for (const key in launchSignatures) {
             const sig = launchSignatures[key]
             if (sig) {
@@ -1081,6 +1112,8 @@ PluginComponent {
         id: spanCropTimer
 
         Timer {
+            id: cropTimer
+            property string outputKey: ""
             property string spanPath: ""
             property var monitors: []
             property string sceneId: ""
@@ -1091,8 +1124,10 @@ PluginComponent {
             interval: delayMs
 
             onTriggered: {
-                if (!root.ready) { destroy(); return }
-                root.applySpanScreenshot(spanPath, monitors, sceneId)
+                if (root.screenshotTimers[outputKey] === cropTimer) delete root.screenshotTimers[outputKey]
+                if (root.ready && root.screenshotStillCurrent(outputKey, sceneId)) {
+                    root.applySpanScreenshot(outputKey, spanPath, monitors, sceneId)
+                }
                 destroy()
             }
         }
@@ -1102,6 +1137,9 @@ PluginComponent {
         id: setWallpaperTimer
 
         Timer {
+            id: wallpaperTimer
+            property string outputKey: ""
+            property string sceneId: ""
             property var wallpaperMonitors: []
             property string screenshotPath: ""
             property int delayMs: 1500
@@ -1111,6 +1149,11 @@ PluginComponent {
             interval: delayMs
 
             onTriggered: {
+                if (root.screenshotTimers[outputKey] === wallpaperTimer) delete root.screenshotTimers[outputKey]
+                if (!root.ready || !root.screenshotStillCurrent(outputKey, sceneId)) {
+                    destroy()
+                    return
+                }
                 if (!SessionData.perMonitorWallpaper) {
                     SessionData.setPerMonitorWallpaper(true)
                 }
@@ -1118,6 +1161,7 @@ PluginComponent {
                     console.info("LinuxWallpaperEngine: Set wp on", m, "to", screenshotPath)
                     SessionData.setMonitorWallpaper(m, screenshotPath)
                 }
+                destroy()
             }
         }
     }
